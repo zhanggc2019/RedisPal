@@ -1,6 +1,6 @@
 # RedisPal
 
-这是原 Redis 桌面客户端的独立重构目录，使用 Go、Wails 3.1 和 Vue 3。界面保留连接侧栏、键树和多标签工作区，Redis 连接与命令由 Go 后端执行。
+RedisPal 是一款使用 Go、Wails 3.1 和 Vue 3 开发的 Redis 桌面客户端。通过连接侧栏、键树和多标签工作区管理 Redis 连接与数据，连接与命令由 Go 后端处理。
 
 ## Windows 构建
 
@@ -11,7 +11,7 @@
 .\bin\RedisPal.exe
 ```
 
-构建脚本通过锁文件安装 Vue 依赖，将 Vite 产物嵌入 EXE。首次启动可选择新建连接，也可导入 Electron 版本导出的连接 JSON。RedisPal 会继续读取改名前保存的连接与界面设置。导出的连接 JSON 包含该配置中已保存的密码。
+构建脚本通过锁文件安装 Vue 依赖，将 Vite 产物嵌入 EXE。首次启动时可新建连接，也可从 JSON 文件导入已有连接配置。应用升级后可继续使用已保存的连接与界面设置。导出的连接配置为 JSON 格式，包含已保存的密码。
 
 安装 NSIS 后，使用 `.\build.ps1 -Installer` 同时生成免安装版 `bin/RedisPal.exe` 和安装包 `bin/RedisPal-windows-x64-setup.exe`。安装版默认写入 `%LOCALAPPDATA%\Programs\RedisPal`，提供开始菜单快捷方式和 Windows 卸载入口。已有安装可在原目录覆盖升级，连接和设置保存在用户配置目录。[NSIS 下载页](https://nsis.sourceforge.io/Download)
 
@@ -27,7 +27,7 @@ foreach ($arch in 'amd64', 'arm64') {
 ## 功能
 
 - 单机、Cluster、Sentinel、ACL、SSH 和 TLS 连接，支持分组、克隆、连通性测试和只读模式。可将已有连接拖到左侧分组标题。SSH 使用系统或指定的 `known_hosts` 文件验证主机密钥。
-- 数据库切换和命名、键的精确及通配符搜索、树形及平铺视图、分页、批量删除、导入导出。键列表默认每批加载 10,000 个键。键备份读取新版 JSON 和原 Electron 版 CSV，支持将键复制到同连接的其他库或通过备份迁移到其他连接。
+- 数据库切换和命名、键的精确及通配符搜索、树形及平铺视图、分页、批量删除、导入导出。键列表默认每批加载 10,000 个键。键备份可导出为 JSON，也可从 JSON 或兼容的 CSV 备份文件导入。支持将键复制到同一连接的其他数据库，或通过备份迁移到其他连接。
 - String、Hash、List、Set、ZSet、Stream、RedisJSON、TimeSeries、Vector Set 和 Array 的可视化编辑。扩展类型及 Hash 字段 TTL 需要 Redis 服务器支持对应命令。
 - Redis CLI 支持历史、补全和命令文件。「数据库操作」菜单可打开 Pub/Sub、Redis Search、实时监控、慢日志和内存分析。Pub/Sub 支持普通、模式和分片订阅。
 - Redis Search 支持浏览和创建索引、字段补全、查询收藏、Explain 和 Profile，需要 Redis 服务端提供 `FT.*`。Stream 详情支持实时刷新、消费组和待处理消息管理。
@@ -67,6 +67,6 @@ git push origin v0.0.2
 
 ## 启动参数和自定义更新源
 
-支持原项目的 `--host`、`--port`、`--auth`、`--username`、`--cluster`、`--readonly`、`--ssh-*`、`--ssl-*` 和 `--sentinel-*` 连接参数。加 `--save` 时会保存由命令行创建的连接。
+可通过 `--host`、`--port`、`--auth`、`--username`、`--cluster`、`--readonly`、`--ssh-*`、`--ssl-*` 和 `--sentinel-*` 等启动参数配置连接。加上 `--save` 可保存通过命令行创建的连接。
 
 如需自托管签名更新源，可通过 `build.ps1 -AppVersion <版本> -UpdateManifestURL <HTTPS 地址> -UpdatePublicKey <Base64 公钥>` 接入 Wails 更新清单。配置成功后，应用会使用该更新源，App 菜单也可手动检查。[Wails 更新清单协议](https://v3.wails.io/reference/update-manifest/)
