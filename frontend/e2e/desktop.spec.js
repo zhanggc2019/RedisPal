@@ -1,14 +1,17 @@
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createServer as createHTTPServer } from 'node:http'
 import { createConnection, createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout } from 'node:timers/promises'
+import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 import { chromium, expect, test } from '@playwright/test'
 
 const addr = process.env.REDIS_TEST_ADDR
 const password = process.env.REDIS_TEST_PASSWORD || ''
+const runFile = promisify(execFile)
 
 /** Allocate a loopback-only CDP port for the isolated desktop test profile. */
 async function port() {
@@ -20,12 +23,12 @@ async function port() {
 }
 
 /** Attach Playwright to the actual WebView2 instance and its Wails bindings. */
-async function launch(updateURL = '') {
+async function launch(updateURL = '', showWindow = false) {
   const profile = await mkdtemp(join(tmpdir(), 'ardm-wails-e2e-'))
   const cdp = await port()
   const exe = process.env.ARDM_TEST_EXE || join(process.cwd(), '..', 'bin', 'RedisPal-test.exe')
   const processHandle = spawn(exe, [], {
-    windowsHide: true,
+    windowsHide: !showWindow,
     stdio: 'ignore',
     env: {
       ...process.env,
@@ -57,6 +60,7 @@ async function launch(updateURL = '') {
     await page.waitForLoadState('domcontentloaded')
     return {
       page,
+      process: processHandle,
       release: async () => {
         await browser.close().catch(() => {})
         processHandle.kill()
@@ -132,6 +136,59 @@ async function databaseTool(page, name) {
   await page.getByRole('button', { name: 'Database actions', exact: true }).click()
   await page.getByRole('button', { name, exact: true }).click()
 }
+
+/** Drive the native window and tray callbacks for this isolated Windows process. */
+async function nativeWindow(action, target) {
+  const script = fileURLToPath(new URL('./windows-window.ps1', import.meta.url))
+  const { stdout } = await runFile('powershell.exe', [
+    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, action, String(target),
+  ], { windowsHide: true, timeout: 8000 })
+  return stdout.trim()
+}
+
+/** Check that a native close can be cancelled, sent to the tray, or used to quit. */
+test('desktop confirms close and can restore the same workspace from the Windows tray', async () => {
+  test.skip(process.platform !== 'win32', 'requires the native Windows tray')
+  const app = await launch('', true)
+  const { page } = app
+  try {
+    const settings = page.getByRole('button', { name: '设置', exact: true })
+    await expect(settings).toBeVisible()
+    const pid = app.process.pid
+    let window
+    await expect.poll(async () => {
+      window = await nativeWindow('main', pid)
+      return Number(window)
+    }).toBeGreaterThan(0)
+    const before = (await nativeWindow('message-windows', pid)).split(/\s+/)
+
+    const prompt = page.getByRole('dialog', { name: '关闭 RedisPal', exact: true })
+    await nativeWindow('close', window)
+    await expect(prompt).toBeVisible()
+    await prompt.getByRole('button', { name: '取消', exact: true }).click()
+    await expect(prompt).toBeHidden()
+    expect(await nativeWindow('visible', window)).toBe('True')
+
+    await nativeWindow('close', window)
+    await prompt.getByRole('button', { name: '最小化到托盘', exact: true }).click()
+    await expect.poll(() => nativeWindow('visible', window)).toBe('False')
+    const after = (await nativeWindow('message-windows', pid)).split(/\s+/)
+    const tray = after.find(handle => handle && !before.includes(handle))
+    expect(tray).toBeTruthy()
+    await nativeWindow('tray-click', tray)
+    await expect.poll(() => nativeWindow('visible', window)).toBe('True')
+    await expect(settings).toBeVisible()
+    await expect(prompt).toBeHidden()
+
+    await english(page)
+    await nativeWindow('close', window)
+    await page.getByRole('dialog', { name: 'Close RedisPal', exact: true })
+      .getByRole('button', { name: 'Quit the app', exact: true }).click()
+    await expect.poll(() => app.process.exitCode).toBe(0)
+  } finally {
+    await app.release()
+  }
+})
 
 /** Drag an active connection into a newly created group and reload the saved workspace. */
 test('desktop moves an existing connection into a new group by drag and drop', async ({}, info) => {

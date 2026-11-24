@@ -1,4 +1,4 @@
-import { Browser, Call, Clipboard, Dialogs, Window } from '@wailsio/runtime'
+import { Application, Browser, Call, Clipboard, Dialogs, Events, Window } from '@wailsio/runtime'
 import { asArg } from './model.js'
 
 // call invokes a named method on the Go Redis service.
@@ -9,6 +9,11 @@ export function call(method, ...args) {
 // updateCall invokes the application-level release service.
 export function updateCall(method) {
   return Call.ByName('main.ReleaseUpdates.' + method)
+}
+
+// desktopCall invokes window lifecycle actions on the native application.
+export function desktopCall(method, ...args) {
+  return Call.ByName('main.DesktopWindow.' + method, ...args)
 }
 
 // command sends a complete RESP command with binary-safe arguments.
@@ -22,4 +27,4 @@ export function selectFile(title) {
   return Dialogs.OpenFile({ Title: title, CanChooseFiles: true, AllowsMultipleSelection: false })
 }
 
-export { Browser, Clipboard, Window }
+export { Application, Browser, Clipboard, Events, Window }

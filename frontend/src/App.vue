@@ -5,7 +5,7 @@ import {
   Activity, ChevronDown, ChevronRight, CircleCheck, CircleHelp, Database, Download, Ellipsis, Folder, FolderPlus,
   KeyRound, List, ListChecks, Network, Plus, Radio, RefreshCw, Search, Server, Settings, Terminal, Trash2, Upload, X,
 } from '@lucide/vue'
-import { Browser, call, updateCall, Window } from './api.js'
+import { Application, Browser, call, desktopCall, Events, updateCall, Window } from './api.js'
 import { asArg, decodeBackup, display, download, identity, keyTree, normalizeConnections } from './model.js'
 import { normalizeLanguage } from './locale.js'
 import { appearance, normalizePreset, themePresets } from './theme.js'
@@ -57,6 +57,8 @@ const draggedConnection = ref(null)
 const dropGroup = ref(null)
 const connectionDialog = ref(null)
 const settingsOpen = ref(false)
+const closePrompt = ref(false)
+const closeBusy = ref(false)
 const releaseConfig = ref({ version: '', github: false })
 const availableUpdate = ref(null)
 const checkingUpdates = ref(false)
@@ -71,6 +73,7 @@ const themeQuery = matchMedia('(prefers-color-scheme: dark)')
 const systemDark = ref(themeQuery.matches)
 let messageTimer
 let updateTimer
+let stopCloseListener
 
 /** Select the current interface language for a label. */
 function tr(zh, en) {
@@ -576,6 +579,31 @@ function systemTheme(event) {
   systemDark.value = event.matches
 }
 
+/** Display the close prompt for a native title bar or keyboard close request. */
+function confirmWindowClose() {
+  closePrompt.value = true
+}
+
+/** Cancel the close request unless the application is handling a choice. */
+function cancelWindowClose() {
+  if (!closeBusy.value) closePrompt.value = false
+}
+
+/** Run the selected native close action and report failures in the workspace. */
+async function finishWindowClose(toTray) {
+  if (closeBusy.value) return
+  closeBusy.value = true
+  try {
+    if (toTray) await desktopCall('MinimiseToTray', tr('打开 RedisPal', 'Open RedisPal'), tr('退出 RedisPal', 'Quit RedisPal'))
+    else await Application.Quit()
+    closePrompt.value = false
+  } catch (error) {
+    notify(error, true)
+  } finally {
+    closeBusy.value = false
+  }
+}
+
 /** Dispatch the desktop keyboard shortcuts from any active panel. */
 function shortcut(event) {
   if (event.key === 'Escape') context.value = null
@@ -599,6 +627,8 @@ function shortcut(event) {
 onMounted(async () => {
   themeQuery.addEventListener('change', systemTheme)
   window.addEventListener('keydown', shortcut)
+  stopCloseListener = Events.On('redispal:close-requested', confirmWindowClose)
+  desktopCall('ReadyForCloseRequests').then(pending => { if (pending) confirmWindowClose() }).catch(error => notify(error, true))
   startUpdateChecks().catch(() => {})
   try {
     const launch = await call('Startup')
@@ -615,6 +645,7 @@ onMounted(async () => {
 onUnmounted(() => {
   themeQuery.removeEventListener('change', systemTheme)
   window.removeEventListener('keydown', shortcut)
+  stopCloseListener?.()
   clearTimeout(messageTimer)
   clearInterval(updateTimer)
 })
@@ -862,6 +893,17 @@ onUnmounted(() => {
         <footer class="modal-footer end"><NButton size="small" @click="answer(false)">{{ tr('取消', 'Cancel') }}</NButton>
           <NButton :type="question.danger ? 'error' : 'primary'" attr-type="submit">{{ tr('确认', 'Confirm') }}</NButton></footer>
       </form>
+    </WorkspaceDialog>
+    <WorkspaceDialog v-if="closePrompt" @close="cancelWindowClose">
+      <section class="modal small-modal" role="dialog" aria-modal="true" aria-labelledby="close-window-title">
+        <header class="modal-header"><h2 id="close-window-title">{{ tr('关闭 RedisPal', 'Close RedisPal') }}</h2></header>
+        <div class="modal-body"><p>{{ tr('退出程序，或放到系统托盘并保留当前连接。', 'Quit the app or keep your connections open in the system tray.') }}</p></div>
+        <footer class="modal-footer end">
+          <NButton size="small" :disabled="closeBusy" @click="cancelWindowClose">{{ tr('取消', 'Cancel') }}</NButton>
+          <NButton size="small" :disabled="closeBusy" @click="finishWindowClose(false)">{{ tr('退出程序', 'Quit the app') }}</NButton>
+          <NButton size="small" type="primary" :disabled="closeBusy" @click="finishWindowClose(true)">{{ tr('最小化到托盘', 'Minimise to tray') }}</NButton>
+        </footer>
+      </section>
     </WorkspaceDialog>
     <div v-if="message" class="toast" :class="{ error: message.error, success: message.success }" role="status">
       <CircleCheck v-if="message.success" :size="21" aria-hidden="true" />
