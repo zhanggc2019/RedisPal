@@ -130,11 +130,13 @@ async function english(page) {
 /** Exercise startup polling and the manual update action against a local GitHub response fixture. */
 test('desktop finds a new release automatically and offers its download page', async () => {
   test.skip(process.platform !== 'win32', 'requires the native Windows build')
+  const version = process.env.ARDM_TEST_APP_VERSION || '0.0.1'
+  const latest = 'v' + version.replace(/\d+$/, patch => String(Number(patch) + 1))
   let checks = 0
   const server = createHTTPServer((_request, response) => {
     checks++
     response.setHeader('Content-Type', 'application/json')
-    response.end(JSON.stringify({ tag_name: 'v0.0.2' }))
+    response.end(JSON.stringify({ tag_name: latest }))
   })
   await new Promise((resolve, reject) => server.listen(0, '127.0.0.1', resolve).once('error', reject))
   let app
@@ -143,7 +145,7 @@ test('desktop finds a new release automatically and offers its download page', a
     const { page } = app
     const status = page.getByRole('status')
     await expect(status).toContainText('发现新版本')
-    await expect(status).toContainText('v0.0.1 → v0.0.2')
+    await expect(status).toContainText('v' + version + ' → ' + latest)
     await expect(page.getByRole('button', { name: '查看并下载' })).toBeVisible()
     await page.getByRole('button', { name: '关闭更新提示' }).click()
     await expect(status).toHaveCount(0)
@@ -151,9 +153,9 @@ test('desktop finds a new release automatically and offers its download page', a
     await expect.poll(() => checks).toBe(2)
     await expect(status).toHaveCount(0)
     await page.getByRole('button', { name: '设置', exact: true }).click()
-    await expect(page.getByRole('dialog')).toContainText('当前版本 v0.0.1')
+    await expect(page.getByRole('dialog')).toContainText('当前版本 v' + version)
     await page.getByRole('button', { name: '检查更新', exact: true }).click()
-    await expect(status).toContainText('v0.0.2')
+    await expect(status).toContainText(latest)
     await expect(page.getByRole('dialog')).toHaveCount(0)
   } finally {
     if (app) await app.release()

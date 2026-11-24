@@ -1,18 +1,16 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { nextReleaseTag } from './release-version.mjs'
+import { releaseVersion } from './release-version.mjs'
 
-// A repository without stable tags publishes v0.0.1 first.
-test('starts at v0.0.1 and ignores prerelease and unrelated tags', () => {
-  assert.equal(nextReleaseTag(['v0.0.9-rc.1', 'snapshot'], []), 'v0.0.1')
+// The build receives exactly the tagged version with the Git tag prefix removed.
+test('uses the exact version selected by the tag', () => {
+  assert.deepEqual(releaseVersion('v0.0.2'), { tag: 'v0.0.2', version: '0.0.2' })
+  assert.deepEqual(releaseVersion('v3.12.10'), { tag: 'v3.12.10', version: '3.12.10' })
 })
 
-// Compare SemVer components numerically, including multiple-digit patch numbers.
-test('increments the highest published patch across minor versions', () => {
-  assert.equal(nextReleaseTag(['v0.0.2', 'v0.1.9', 'v0.0.19', 'v0.1.10'], []), 'v0.1.11')
-})
-
-// A rerun uses the existing tag for the same commit even after a later tag was published.
-test('reuses a stable tag already pointing at the selected commit', () => {
-  assert.equal(nextReleaseTag(['v0.0.1', 'v0.0.2'], ['v0.0.1', 'v0.0.9-beta']), 'v0.0.1')
+// A missing or malformed tag cannot produce a fallback version or a release.
+test('requires a stable vX.Y.Z tag', () => {
+  for (const tag of [undefined, '', 'main', '0.0.2', 'v0.2', 'v02.0.0', 'v0.0.2-rc.1', 'v0.0.2\n']) {
+    assert.throws(() => releaseVersion(tag), /vX.Y.Z/)
+  }
 })

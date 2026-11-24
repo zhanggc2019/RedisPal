@@ -46,9 +46,16 @@ Playwright 连接独立测试版 EXE 的 WebView2，直接操作界面并通过 
 
 可选环境变量 `REDIS_TEST_CLUSTER` 指向测试 Cluster，`REDIS_TEST_SENTINEL` 指向主节点名为 `ardm` 的 Sentinel。设置 `REDIS_TEST_MODULES` 和 `REDIS_TEST_NATIVE` 可运行 RedisJSON、TimeSeries、Vector Set 和 Array 的桌面测试。
 
-## GitHub Actions 与自动发布
+## GitHub Actions 与标签发布
 
-向 `main` 推送或在 Actions 中手动运行工作流后，GitHub 会执行前端和 Go 测试，构建 Windows x64 可执行文件，再为通过验证的提交打标签并发布。首次版本为 `v0.0.1`，后续递增补丁号。同一提交重跑会复用标签。Pull Request 会运行测试和构建。
+推送 `main` 或提交 Pull Request 会运行前端和 Redis 集成测试。准备发布时，请在包含本次改动的提交上创建 `vX.Y.Z` 标签并推送到 GitHub。
+
+```powershell
+git tag -a v0.0.2 -m "RedisPal v0.0.2"
+git push origin v0.0.2
+```
+
+标签推送会触发测试、Windows x64 构建和 GitHub Release。软件显示的版本直接取自标签，例如推送 `v0.0.2` 后，设置和发布页都会显示 `v0.0.2`。
 
 [GitHub Releases](https://github.com/zhanggc2019/RedisPal/releases) 提供 Windows x64 EXE 和 `SHA256SUMS`。应用启动后及运行期间每六小时会检查正式版本，也可在设置中点击「检查更新」。发现新版时，点击「查看并下载」可打开对应发布页。
 
