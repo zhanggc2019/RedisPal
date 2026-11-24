@@ -14,9 +14,6 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-//go:embed frontend/public/logo.png
-var icon []byte
-
 const appName = "RedisPal"
 
 // main embeds the Vue production build and starts the native Wails application.
@@ -24,6 +21,10 @@ func main() {
 	frontend, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
 		log.Fatal(err)
+	}
+	icon, err := fs.ReadFile(frontend, "logo.png")
+	if err != nil {
+		log.Printf("load application icon: %v", err)
 	}
 	profile := os.Getenv("ARDM_WEBVIEW_PROFILE")
 	if profile == "" {
