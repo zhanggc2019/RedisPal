@@ -13,12 +13,14 @@
 
 构建脚本通过锁文件安装 Vue 依赖，将 Vite 产物嵌入 EXE。首次启动可选择新建连接，也可导入 Electron 版本导出的连接 JSON。RedisPal 会继续读取改名前保存的连接与界面设置。导出的连接 JSON 包含该配置中已保存的密码。
 
-修改 `frontend/public/logo.png` 后，可用 Wails CLI 重新生成 Windows 图标资源。生成的 `.syso` 会在构建时嵌入可执行文件。[Wails 图标与打包文档](https://v3.wails.io/concepts/build-system/#icons-and-packaging)
+安装 NSIS 后，使用 `.\build.ps1 -Installer` 同时生成免安装版 `bin/RedisPal.exe` 和安装包 `bin/RedisPal-windows-x64-setup.exe`。安装版默认写入 `%LOCALAPPDATA%\Programs\RedisPal`，提供开始菜单快捷方式和 Windows 卸载入口。已有安装可在原目录覆盖升级，连接和设置保存在用户配置目录。[NSIS 下载页](https://nsis.sourceforge.io/Download)
+
+修改 `frontend/public/logo.png` 后，可用 Wails CLI 重新生成安装包和可执行文件的图标资源。[Wails 图标与打包文档](https://v3.wails.io/concepts/build-system/#icons-and-packaging)
 
 ```powershell
-wails3 generate icons -input frontend/public/logo.png -windowsfilename bin/RedisPal.ico -macfilename=
+wails3 generate icons -input frontend/public/logo.png -windowsfilename build/windows/RedisPal.ico -macfilename=
 foreach ($arch in 'amd64', 'arm64') {
-    wails3 generate syso -arch $arch -icon bin/RedisPal.ico -manifest build/windows/RedisPal.manifest -out "redispal_windows_$arch.syso"
+    wails3 generate syso -arch $arch -icon build/windows/RedisPal.ico -manifest build/windows/RedisPal.manifest -out "redispal_windows_$arch.syso"
 }
 ```
 
@@ -61,7 +63,7 @@ git push origin v0.0.2
 
 标签推送会触发测试、Windows x64 构建和 GitHub Release。软件显示的版本直接取自标签，例如推送 `v0.0.2` 后，设置和发布页都会显示 `v0.0.2`。
 
-[GitHub Releases](https://github.com/zhanggc2019/RedisPal/releases) 提供 Windows x64 EXE 和 `SHA256SUMS`。应用启动后及运行期间每六小时会检查正式版本，也可在设置中点击「检查更新」。发现新版时，点击「查看并下载」可打开对应发布页。
+[GitHub Releases](https://github.com/zhanggc2019/RedisPal/releases) 提供免安装版 `RedisPal-windows-x64.exe`、安装包 `RedisPal-windows-x64-setup.exe` 和两者的 `SHA256SUMS`。应用启动后及运行期间每六小时会检查正式版本，也可在设置中点击「检查更新」。发现新版时，点击「查看并下载」可打开对应发布页。
 
 ## 启动参数和自定义更新源
 

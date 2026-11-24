@@ -79,19 +79,34 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: '1.26.x'
+      - name: Prepare NSIS
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP 'nsis-3.13.zip'
+          curl.exe --fail --location --retry 3 --max-time 90 --silent --show-error 'https://downloads.sourceforge.net/project/nsis/NSIS%203/3.13/nsis-3.13.zip' -o $archive
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download NSIS' }
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne 'BA63DFFC4410EE89193E1CB5A41989991BD77C61068DA17E3156D136B7B0B3D8') {
+            throw 'NSIS archive checksum mismatch'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $env:RUNNER_TEMP -Force
+          Join-Path $env:RUNNER_TEMP 'nsis-3.13' | Add-Content -LiteralPath $env:GITHUB_PATH
       - name: Build Windows x64
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Path release | Out-Null
-          ./build.ps1 -AppVersion $env:APP_VERSION
+          ./build.ps1 -AppVersion $env:APP_VERSION -Installer
           Copy-Item -LiteralPath bin/RedisPal.exe -Destination release/RedisPal-windows-x64.exe
+          Copy-Item -LiteralPath bin/RedisPal-windows-x64-setup.exe -Destination release/RedisPal-windows-x64-setup.exe
       - name: Test the Windows application and release checker
         run: go test ./...
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: RedisPal-${{ needs.test.outputs.tag }}-windows-x64
-          path: release/RedisPal-windows-x64.exe
+          path: |
+            release/RedisPal-windows-x64.exe
+            release/RedisPal-windows-x64-setup.exe
           if-no-files-found: error
 
   release:
@@ -120,14 +135,14 @@ jobs:
             exit 1
           fi
           cd release
-          binary=RedisPal-windows-x64.exe
-          sha256sum "$binary" > SHA256SUMS
+          binaries=(RedisPal-windows-x64.exe RedisPal-windows-x64-setup.exe)
+          sha256sum "${binaries[@]}" > SHA256SUMS
           if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
             if [[ "$draft" == 'true' ]]; then
-              gh release upload "$TAG" "$binary" SHA256SUMS --clobber
+              gh release upload "$TAG" "${binaries[@]}" SHA256SUMS --clobber
               gh release edit "$TAG" --draft=false
             fi
           else
-            gh release create "$TAG" "$binary" SHA256SUMS \
+            gh release create "$TAG" "${binaries[@]}" SHA256SUMS \
               --verify-tag --title "RedisPal $TAG" --generate-notes
           fi
