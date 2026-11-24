@@ -16,7 +16,7 @@ import (
 
 // Release builds can pin a Wails manifest URL and public key via Go linker flags.
 var (
-	appVersion        = "0.1.0"
+	appVersion        = "0.0.1"
 	updateManifestURL string
 	updatePublicKey   string
 )

@@ -1,7 +1,7 @@
 param(
     [switch]$DesktopTest,
     [ValidatePattern('^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]+)?$')]
-    [string]$AppVersion = '0.1.0',
+    [string]$AppVersion = '0.0.1',
     [ValidatePattern('^https://[^\s"''\x60]+$')]
     [string]$UpdateManifestURL,
     [ValidatePattern('^[A-Za-z0-9+/]{43}=$')]

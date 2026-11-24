@@ -4,7 +4,7 @@ import {
   Activity, ChevronDown, ChevronRight, CircleCheck, CircleHelp, Database, Download, Ellipsis, FolderPlus,
   KeyRound, List, ListChecks, Network, Plus, RefreshCw, Search, Server, Settings, Terminal, Trash2, Upload, X,
 } from '@lucide/vue'
-import { call, Window } from './api.js'
+import { Browser, call, updateCall, Window } from './api.js'
 import { asArg, decodeBackup, display, download, identity, keyTree, normalizeConnections } from './model.js'
 import { normalizeLanguage } from './locale.js'
 import ConnectionDialog from './ConnectionDialog.vue'
@@ -42,6 +42,9 @@ const searchingConnections = ref(false)
 const collapsedGroups = reactive(new Set())
 const connectionDialog = ref(null)
 const settingsOpen = ref(false)
+const releaseConfig = ref({ version: '', github: false })
+const availableUpdate = ref(null)
+const checkingUpdates = ref(false)
 const shortcutsOpen = ref(false)
 const context = ref(null)
 const question = ref(null)
@@ -52,6 +55,7 @@ const searchInput = ref(null)
 const themeQuery = matchMedia('(prefers-color-scheme: dark)')
 const systemDark = ref(themeQuery.matches)
 let messageTimer
+let updateTimer
 
 /** Select the current interface language for a label. */
 function tr(zh, en) {
@@ -65,6 +69,49 @@ function notify(text, status = false) {
   const success = status === 'success'
   message.value = { text: text?.message || String(text), error, success }
   messageTimer = setTimeout(() => { message.value = null }, error ? 8000 : success ? 5200 : 4200)
+}
+
+/** Read the build version and check the GitHub feed in the background. */
+async function startUpdateChecks() {
+  releaseConfig.value = await updateCall('Configuration')
+  if (!releaseConfig.value.github) return
+  void checkForUpdate()
+  updateTimer = setInterval(checkForUpdate, 6 * 60 * 60 * 1000)
+}
+
+/** Check for a newer stable release, surfacing errors only for manual checks. */
+async function checkForUpdate(manual = false) {
+  if (checkingUpdates.value) return
+  checkingUpdates.value = true
+  try {
+    const release = await updateCall('Check')
+    if (!release.version) {
+      availableUpdate.value = null
+      if (manual) notify(tr('当前已是最新版本', 'You are up to date'))
+    } else if (manual || release.version !== localStorage.getItem('ardm-dismissed-update')) {
+      availableUpdate.value = release
+      if (manual) settingsOpen.value = false
+    }
+  } catch (error) {
+    if (manual) notify(tr('检查更新失败', 'Could not check for updates') + ' · ' + (error.message || String(error)), true)
+  } finally {
+    checkingUpdates.value = false
+  }
+}
+
+/** Hide the automatic prompt for this release until a newer version is published. */
+function dismissUpdate() {
+  localStorage.setItem('ardm-dismissed-update', availableUpdate.value.version)
+  availableUpdate.value = null
+}
+
+/** Open the official release page in the system browser. */
+async function openUpdate() {
+  try {
+    await Browser.OpenURL(availableUpdate.value.url)
+  } catch (error) {
+    notify(error, true)
+  }
 }
 
 /** Ask for a value or explicit destructive-action confirmation inside the desktop window. */
@@ -486,6 +533,7 @@ function shortcut(event) {
 onMounted(async () => {
   themeQuery.addEventListener('change', systemTheme)
   window.addEventListener('keydown', shortcut)
+  startUpdateChecks().catch(() => {})
   try {
     const launch = await call('Startup')
     if (launch?.connection?.addr) {
@@ -502,6 +550,7 @@ onUnmounted(() => {
   themeQuery.removeEventListener('change', systemTheme)
   window.removeEventListener('keydown', shortcut)
   clearTimeout(messageTimer)
+  clearInterval(updateTimer)
 })
 </script>
 
@@ -601,6 +650,15 @@ onUnmounted(() => {
           <button v-if="tab.kind !== 'home'" class="flat icon close-tab" :aria-label="tr('关闭标签', 'Close tab')" @click="closeTab(tab.id)"><X :size="13" /></button>
         </div>
       </div>
+      <div v-if="availableUpdate" class="update-banner">
+        <Download :size="17" aria-hidden="true" />
+        <div class="update-message" role="status">
+          <strong>{{ tr('发现新版本', 'Update available') }}</strong>
+          <span>{{ releaseConfig.version }} → {{ availableUpdate.version }}</span>
+        </div>
+        <button class="primary" @click="openUpdate">{{ tr('查看并下载', 'View and download') }}</button>
+        <button class="flat icon" :aria-label="tr('关闭更新提示', 'Dismiss update')" @click="dismissUpdate"><X :size="16" /></button>
+      </div>
       <section v-show="active.kind === 'home'" class="home">
         <img src="/logo.png" alt="" class="home-logo">
         <h1>RedisPal</h1>
@@ -663,7 +721,10 @@ onUnmounted(() => {
     <ConnectionDialog v-if="connectionDialog" :initial="connectionDialog.initial" :editing="connectionDialog.editing" :groups="groups" @save="saveConnection" @close="connectionDialog = null" />
     <div v-if="settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false" @keydown.esc="settingsOpen = false">
       <section class="modal" role="dialog" aria-modal="true">
-        <header class="modal-header"><h2>{{ tr('设置', 'Settings') }}</h2><button class="flat icon" @click="settingsOpen = false"><X :size="19" /></button></header>
+        <header class="modal-header">
+          <h2>{{ tr('设置', 'Settings') }}</h2>
+          <button class="flat icon" :aria-label="tr('关闭设置', 'Close settings')" @click="settingsOpen = false"><X :size="19" /></button>
+        </header>
         <div class="modal-body form-grid">
           <label>{{ tr('主题', 'Theme') }}<select v-model="settings.theme"><option value="system">{{ tr('跟随系统', 'System') }}</option><option value="light">{{ tr('浅色', 'Light') }}</option><option value="dark">{{ tr('深色', 'Dark') }}</option></select></label>
           <label>{{ tr('语言', 'Language') }}<select v-model="settings.language">
@@ -672,6 +733,12 @@ onUnmounted(() => {
           <label>{{ tr('界面缩放', 'Interface zoom') }}<select v-model.number="settings.zoom"><option v-for="zoom in [85, 90, 100, 110, 120, 130]" :key="zoom" :value="zoom">{{ zoom }}%</option></select></label>
           <label>{{ tr('界面字体', 'Interface font') }}<input v-model="settings.font" :placeholder="tr('系统默认', 'System default')"></label>
           <label>{{ tr('每次扫描数量', 'Keys per scan') }}<select v-model.number="settings.scanCount"><option v-for="count in [100, 400, 1000, 5000, 10000]" :key="count" :value="count">{{ count }}</option></select></label>
+          <div v-if="releaseConfig.version" class="update-settings">
+            <span>{{ tr('当前版本', 'Current version') }} <strong>{{ releaseConfig.version }}</strong></span>
+            <button v-if="releaseConfig.github" :disabled="checkingUpdates" @click="checkForUpdate(true)">
+              {{ checkingUpdates ? tr('正在检查…', 'Checking…') : tr('检查更新', 'Check for updates') }}
+            </button>
+          </div>
         </div>
       </section>
     </div>

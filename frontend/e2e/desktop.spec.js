@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
+import { createServer as createHTTPServer } from 'node:http'
 import { createConnection, createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -19,7 +20,7 @@ async function port() {
 }
 
 /** Attach Playwright to the actual WebView2 instance and its Wails bindings. */
-async function launch() {
+async function launch(updateURL = '') {
   const profile = await mkdtemp(join(tmpdir(), 'ardm-wails-e2e-'))
   const cdp = await port()
   const exe = process.env.ARDM_TEST_EXE || join(process.cwd(), '..', 'bin', 'RedisPal-test.exe')
@@ -30,6 +31,7 @@ async function launch() {
       ...process.env,
       ARDM_WEBVIEW_PROFILE: profile,
       ARDM_TEST_CDP_PORT: String(cdp),
+      ARDM_TEST_UPDATE_URL: updateURL,
     },
   })
   let spawnError
@@ -122,8 +124,42 @@ async function english(page) {
   page.setDefaultTimeout(8_000)
   await page.getByRole('button', { name: /^(设置|Settings)$/ }).click()
   await page.getByRole('combobox', { name: /^(语言|Language)$/ }).selectOption('en')
-  await page.getByRole('dialog').locator('button').click()
+  await page.getByRole('dialog').getByRole('button', { name: /^(关闭设置|Close settings)$/ }).click()
 }
+
+/** Exercise startup polling and the manual update action against a local GitHub response fixture. */
+test('desktop finds a new release automatically and offers its download page', async () => {
+  test.skip(process.platform !== 'win32', 'requires the native Windows build')
+  let checks = 0
+  const server = createHTTPServer((_request, response) => {
+    checks++
+    response.setHeader('Content-Type', 'application/json')
+    response.end(JSON.stringify({ tag_name: 'v0.0.2' }))
+  })
+  await new Promise((resolve, reject) => server.listen(0, '127.0.0.1', resolve).once('error', reject))
+  let app
+  try {
+    app = await launch('http://127.0.0.1:' + server.address().port)
+    const { page } = app
+    const status = page.getByRole('status')
+    await expect(status).toContainText('发现新版本')
+    await expect(status).toContainText('v0.0.1 → v0.0.2')
+    await expect(page.getByRole('button', { name: '查看并下载' })).toBeVisible()
+    await page.getByRole('button', { name: '关闭更新提示' }).click()
+    await expect(status).toHaveCount(0)
+    await page.reload()
+    await expect.poll(() => checks).toBe(2)
+    await expect(status).toHaveCount(0)
+    await page.getByRole('button', { name: '设置', exact: true }).click()
+    await expect(page.getByRole('dialog')).toContainText('当前版本 v0.0.1')
+    await page.getByRole('button', { name: '检查更新', exact: true }).click()
+    await expect(status).toContainText('v0.0.2')
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+  } finally {
+    if (app) await app.release()
+    await new Promise(resolve => server.close(resolve))
+  }
+})
 
 /** Check that primary actions use the logo's green palette with legible button text. */
 test('desktop themes use green primary actions with readable text', async ({}, info) => {
@@ -137,7 +173,7 @@ test('desktop themes use green primary actions with readable text', async ({}, i
       await page.getByRole('button', { name: '设置', exact: true }).click()
       const dialog = page.getByRole('dialog')
       await dialog.getByRole('combobox', { name: '主题', exact: true }).selectOption(theme)
-      await dialog.locator('button').click()
+      await dialog.getByRole('button', { name: '关闭设置', exact: true }).click()
       await expect(root).toHaveAttribute('data-theme', theme)
       const [background, foreground] = await primary.evaluate(button => {
         const style = getComputedStyle(button)
@@ -178,7 +214,7 @@ test('desktop app creates, edits, searches, backs up, restores and deletes Redis
     await expect(language.getByRole('option')).toHaveText(['简体中文', 'English'])
     await language.selectOption('en')
     await expect(page.getByRole('dialog').getByRole('heading', { name: 'Settings' })).toBeVisible()
-    await page.getByRole('dialog').locator('button').click()
+    await page.getByRole('dialog').getByRole('button', { name: 'Close settings', exact: true }).click()
     // Seed an existing workspace with the storage key used before the rename.
     await page.evaluate(() => {
       const workspace = JSON.parse(localStorage.getItem('ardm-workspace-v1'))

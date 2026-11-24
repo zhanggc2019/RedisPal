@@ -157,6 +157,18 @@ pre, .mono, .tree-key, .key-metadata .ttl-field input { font-family: Consolas, "
 .tab-button span { overflow: hidden; text-overflow: ellipsis; }
 .tab-shell .close-tab { width: 24px; min-height: 22px; margin-right: 3px; align-self: center; opacity: .75; }
 .tab-panel { flex: 1; min-height: 0; min-width: 0; overflow: auto; }
+.update-banner {
+  display: flex; align-items: center; gap: 9px; flex: none; padding: 7px 12px;
+  background: var(--accent-soft); color: var(--accent-text); border-bottom: 1px solid var(--border);
+}
+.update-banner > svg { flex: none; }
+.update-message { display: flex; align-items: baseline; flex: 1; flex-wrap: wrap; gap: 3px 9px; }
+.update-message span { font-size: 12px; }
+.update-settings {
+  grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); color: var(--muted);
+}
+.update-settings strong { color: var(--ink); }
 .home {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px;
   background: radial-gradient(ellipse at 50% 45%, var(--home-glow), transparent 72%), var(--bg);

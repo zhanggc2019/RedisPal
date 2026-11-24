@@ -33,7 +33,8 @@ func main() {
 		}
 	}
 	windows := application.WindowsOptions{WebviewUserDataPath: profile}
-	configureDesktopTest(&windows)
+	releaseUpdates := newReleaseUpdates(appVersion)
+	configureDesktopTest(&windows, releaseUpdates)
 	startup, err := redisdesk.ParseLaunchProfile(os.Args[1:])
 	if err != nil {
 		log.Print(err)
@@ -44,10 +45,14 @@ func main() {
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(frontend),
 		},
-		Services: []application.Service{application.NewService(redisdesk.NewService(startup))},
-		Windows:  windows,
+		Services: []application.Service{
+			application.NewService(redisdesk.NewService(startup)),
+			application.NewService(releaseUpdates),
+		},
+		Windows: windows,
 	})
 	updates := configureUpdater(app)
+	releaseUpdates.signed = updates
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title: appName, Width: 1260, Height: 780,
 		MinWidth: 860, MinHeight: 520, URL: "/", UseApplicationMenu: updates,

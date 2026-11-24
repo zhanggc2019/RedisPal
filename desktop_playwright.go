@@ -9,8 +9,9 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-// configureDesktopTest enables loopback CDP solely in the disposable Playwright build.
-func configureDesktopTest(options *application.WindowsOptions) {
+// configureDesktopTest sets the disposable WebView and update endpoint for Playwright.
+func configureDesktopTest(options *application.WindowsOptions, updates *ReleaseUpdates) {
+	updates.endpoint = os.Getenv("ARDM_TEST_UPDATE_URL")
 	port, err := strconv.ParseUint(os.Getenv("ARDM_TEST_CDP_PORT"), 10, 16)
 	if err == nil && port > 0 {
 		options.AdditionalBrowserArgs = append(options.AdditionalBrowserArgs,

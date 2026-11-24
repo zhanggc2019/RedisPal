@@ -46,8 +46,14 @@ Playwright 连接独立测试版 EXE 的 WebView2，直接操作界面并通过 
 
 可选环境变量 `REDIS_TEST_CLUSTER` 指向测试 Cluster，`REDIS_TEST_SENTINEL` 指向主节点名为 `ardm` 的 Sentinel。设置 `REDIS_TEST_MODULES` 和 `REDIS_TEST_NATIVE` 可运行 RedisJSON、TimeSeries、Vector Set 和 Array 的桌面测试。
 
-## 启动参数和更新
+## GitHub Actions 与自动发布
+
+向 `main` 推送或在 Actions 中手动运行工作流后，GitHub 会执行前端和 Go 测试，构建 Windows x64 可执行文件，再为通过验证的提交打标签并发布。首次版本为 `v0.0.1`，后续递增补丁号。同一提交重跑会复用标签。Pull Request 会运行测试和构建。
+
+[GitHub Releases](https://github.com/zhanggc2019/RedisPal/releases) 提供 Windows x64 EXE 和 `SHA256SUMS`。应用启动后及运行期间每六小时会检查正式版本，也可在设置中点击「检查更新」。发现新版时，点击「查看并下载」可打开对应发布页。
+
+## 启动参数和自定义更新源
 
 支持原项目的 `--host`、`--port`、`--auth`、`--username`、`--cluster`、`--readonly`、`--ssh-*`、`--ssl-*` 和 `--sentinel-*` 连接参数。加 `--save` 时会保存由命令行创建的连接。
 
-签名发布版可通过 `build.ps1 -AppVersion <版本> -UpdateManifestURL <HTTPS 地址> -UpdatePublicKey <Base64 公钥>` 接入 Wails 更新清单。配置后可从 App 菜单手动检查，也会定期检查。当前本地构建未配置发布源。[Wails 更新清单协议](https://v3.wails.io/reference/update-manifest/)
+如需自托管签名更新源，可通过 `build.ps1 -AppVersion <版本> -UpdateManifestURL <HTTPS 地址> -UpdatePublicKey <Base64 公钥>` 接入 Wails 更新清单。配置成功后，应用会使用该更新源，App 菜单也可手动检查。[Wails 更新清单协议](https://v3.wails.io/reference/update-manifest/)
