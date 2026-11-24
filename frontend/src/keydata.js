@@ -1,4 +1,5 @@
 import { display } from './model.js'
+import { streamPage } from './streamdata.js'
 
 export const redisTypes = ['string', 'hash', 'list', 'set', 'zset', 'stream', 'ReJSON-RL', 'TSDB-TYPE', 'vectorset', 'array']
 const batch = 100
@@ -31,10 +32,11 @@ export async function listedRows(run, type, key, start, filter, range) {
     if (filter) rows = rows.filter(row => display(row.value).includes(filter))
     if (data.length === batch) cursor = offset + data.length
   } else if (type === 'stream') {
-    const data = await run('XRANGE', key, start ?? (range.from || '-'), range.to || '+', 'COUNT', batch)
-    rows = data.map(([index, pairs]) => ({ index, value: pairs }))
+    const data = await run('XREVRANGE', key, start ?? (range.to || '+'), range.from || '-', 'COUNT', batch + 1)
+    const page = streamPage(data, batch)
+    rows = page.entries.map(([index, pairs]) => ({ index, value: pairs }))
     if (filter) rows = rows.filter(row => row.value.some(value => display(value).includes(filter)))
-    if (data.length === batch) cursor = '(' + data.at(-1)[0]
+    cursor = page.cursor
   } else if (type === 'TSDB-TYPE') {
     const data = await run('TS.RANGE', key, start ?? (range.from || '-'), range.to || '+', 'COUNT', batch)
     rows = data.map(([index, value]) => ({ index, value }))

@@ -1,11 +1,12 @@
 <script setup>
-import { computed, inject, onMounted, ref } from 'vue'
-import { Activity, Clock3, Download, HardDrive, RefreshCw, Search, Trash2 } from '@lucide/vue'
-import { call, command } from './api.js'
+import { computed, inject, onMounted, ref, watch } from 'vue'
+import { Activity, Clock3, Download, HardDrive, RefreshCw, Search, Settings, Trash2 } from '@lucide/vue'
+import { call } from './api.js'
 import { asArg, display, download, identity } from './model.js'
 import { pretty } from './formats.js'
+import SlowLogSettings from './SlowLogSettings.vue'
 
-const props = defineProps({ tab: Object, connection: Object })
+const props = defineProps({ tab: Object, connection: Object, visible: Boolean })
 const tr = inject('tr')
 const ask = inject('ask')
 const notify = inject('notify')
@@ -15,6 +16,10 @@ const raw = ref([])
 const size = ref(128)
 const finished = ref(false)
 const error = ref('')
+const node = ref('')
+const nodes = ref([])
+const autoInterval = ref(0)
+const settingsOpen = ref(false)
 const total = computed(() => raw.value.reduce((sum, row) => sum + row.bytes, 0))
 const tool = computed(() => ({
   slow: { title: tr('慢日志', 'Slow log'), icon: Clock3 },
@@ -32,14 +37,21 @@ function formatBytes(bytes) {
 }
 
 /** Fetch Redis slow logs, local command logs or all requested memory samples. */
-async function refresh() {
+async function refresh(reloadNodes = false) {
   if (busy.value) return
   busy.value = true
   error.value = ''
   try {
     if (props.tab.kind === 'logs') raw.value = await call('Logs')
-    else if (props.tab.kind === 'slow') raw.value = await command(props.connection.id, props.tab.db, 'SLOWLOG', 'GET', size.value)
-    else await memory()
+    else if (props.tab.kind === 'slow') {
+      if (props.connection.mode === 'cluster' && (reloadNodes || !nodes.value.length)) {
+        const addresses = await call('SlowLogNodes', props.connection.id, props.tab.db)
+        nodes.value = addresses
+        if (!addresses.includes(node.value)) node.value = addresses[0] || ''
+      }
+      const result = await call('SlowLogEntries', props.connection.id, props.tab.db, node.value, size.value || 128)
+      raw.value = result.value
+    } else await memory()
   } catch (failure) {
     error.value = failure.message
   } finally {
@@ -72,9 +84,9 @@ async function memory() {
 
 /** Reset command logs locally or clear the server's SLOWLOG on confirmation. */
 async function reset() {
-  if (!await ask({ title: tr('清空日志', 'Clear log'), text: tool.value.title, danger: true })) return
+  if (!await ask({ title: tr('清空日志', 'Clear log'), text: node.value || tool.value.title, danger: true })) return
   try {
-    if (props.tab.kind === 'slow') await command(props.connection.id, props.tab.db, 'SLOWLOG', 'RESET')
+    if (props.tab.kind === 'slow') await call('ResetSlowLog', props.connection.id, props.tab.db, node.value)
     else await call('ClearLogs')
     await refresh()
   } catch (failure) {
@@ -83,6 +95,12 @@ async function reset() {
 }
 
 onMounted(() => { if (props.tab.kind !== 'memory') refresh() })
+watch([autoInterval, () => props.visible], ([seconds, visible], _, onCleanup) => {
+  if (props.tab.kind !== 'slow' || !visible || !seconds) return
+  void refresh()
+  const timer = setInterval(() => refresh(), seconds * 1000)
+  onCleanup(() => clearInterval(timer))
+})
 </script>
 
 <template>
@@ -90,22 +108,35 @@ onMounted(() => { if (props.tab.kind !== 'memory') refresh() })
     <header class="panel-heading">
       <div class="panel-title"><div class="eyebrow">{{ connection.name }} · DB {{ tab.db }}</div><h1><component :is="tool.icon" :size="23" />{{ tool.title }}</h1></div>
       <div class="heading-actions">
-        <button :disabled="busy" @click="refresh()"><RefreshCw :size="15" :class="{ spin: busy }" />{{ tr('刷新', 'Refresh') }}</button>
-        <button :disabled="!found.length" @click="download(tab.kind + '.json', JSON.stringify(found, null, 2))"><Download :size="15" />{{ tr('导出', 'Export') }}</button>
-        <button v-if="tab.kind !== 'memory'" class="icon danger" :title="tr('清空日志', 'Clear logs')" :disabled="tab.kind === 'slow' && connection.readOnly" @click="reset"><Trash2 :size="16" /></button>
+        <NButton size="small" :disabled="busy" @click="refresh(true)"><RefreshCw :size="15" :class="{ spin: busy }" />{{ tr('刷新', 'Refresh') }}</NButton>
+        <NButton v-if="tab.kind === 'slow'" size="small" :disabled="busy || (connection.mode === 'cluster' && !node)" @click="settingsOpen = true">
+          <Settings :size="15" />{{ tr('慢日志设置', 'Slow log settings') }}
+        </NButton>
+        <NButton size="small" :disabled="!found.length" @click="download(tab.kind + '.json', JSON.stringify(found, null, 2))"><Download :size="15" />{{ tr('导出', 'Export') }}</NButton>
+        <NButton size="small" type="error" v-if="tab.kind !== 'memory'" class="icon danger" :title="tr('清空日志', 'Clear logs')" :disabled="tab.kind === 'slow' && connection.readOnly" @click="reset"><Trash2 :size="16" /></NButton>
       </div>
     </header>
     <form class="row-tools" @submit.prevent="refresh">
       <div v-if="tab.kind === 'memory' || tab.kind === 'logs'" class="search-field"><Search :size="16" />
         <input v-model="query" :placeholder="tab.kind === 'memory' ? tr('键模式，例如 session:*', 'Key pattern, e.g. session:*') : tr('筛选命令', 'Filter commands')" spellcheck="false">
       </div>
-      <label v-else class="soft-check">{{ tr('日志条数', 'Entries') }}<input v-model.number="size" type="number" min="1" max="10000"></label>
-      <button v-if="tab.kind !== 'logs'" class="primary" :disabled="busy">{{ tab.kind === 'memory' ? tr('开始分析', 'Analyze') : tr('查询', 'Query') }}</button>
+      <template v-else>
+        <label v-if="nodes.length" class="soft-check">{{ tr('主节点', 'Primary node') }}
+          <select v-model="node" :disabled="busy" @change="refresh()"><option v-for="address in nodes" :key="address">{{ address }}</option></select>
+        </label>
+        <label class="soft-check">{{ tr('日志条数', 'Entries') }}<input v-model.number="size" type="number" min="1" max="10000"></label>
+        <label class="soft-check">{{ tr('自动刷新', 'Auto-refresh') }}
+          <select v-model.number="autoInterval"><option :value="0">{{ tr('关闭', 'Off') }}</option>
+            <option v-for="seconds in [1, 3, 5, 10, 30]" :key="seconds" :value="seconds">{{ seconds }} {{ tr('秒', 'sec') }}</option>
+          </select>
+        </label>
+      </template>
+      <NButton size="small" type="primary" attr-type="submit" v-if="tab.kind !== 'logs'" class="primary" :disabled="busy">{{ tab.kind === 'memory' ? tr('开始分析', 'Analyze') : tr('查询', 'Query') }}</NButton>
       <span v-if="finished" class="muted">{{ raw.length }} {{ tr('个键', 'keys') }} · {{ formatBytes(total) }}</span>
     </form>
     <p v-if="error" class="notice error" role="alert">{{ error }}</p>
     <div class="table-wrap">
-      <table class="data-table">
+      <NTable size="small" :bordered="false" class="data-table">
         <thead>
           <tr v-if="tab.kind === 'memory'"><th>{{ tr('键名', 'Key') }}</th><th>{{ tr('内存用量', 'Memory usage') }}</th></tr>
           <tr v-else-if="tab.kind === 'slow'"><th>ID</th><th>{{ tr('时间', 'Time') }}</th><th>{{ tr('耗时（µs）', 'Duration (µs)') }}</th><th>{{ tr('命令', 'Command') }}</th><th>{{ tr('客户端', 'Client') }}</th></tr>
@@ -119,8 +150,9 @@ onMounted(() => { if (props.tab.kind !== 'memory') refresh() })
             <td>{{ row.database }}</td><td class="mono">{{ row.command }}</td><td>{{ row.elapsedMs }}</td><td :class="{ danger: row.error }">{{ row.error || 'OK' }}</td></tr></template>
           <tr v-if="!found.length"><td colspan="5" class="empty-cell">{{ busy ? tr('正在加载…', 'Loading…') : tr('无结果', 'No results') }}</td></tr>
         </tbody>
-      </table>
+      </NTable>
     </div>
     <p v-if="tab.kind === 'memory' && found.length > 1000" class="muted">{{ tr('显示内存占用最高的 1000 个键。导出可查看全部结果。', 'Showing the 1,000 largest keys. Export for the full result.') }}</p>
+    <SlowLogSettings v-if="settingsOpen" :tab="tab" :connection="connection" :node="node" @close="settingsOpen = false" />
   </div>
 </template>

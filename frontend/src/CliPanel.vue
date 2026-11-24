@@ -186,9 +186,9 @@ onUnmounted(() => {
     <header class="panel-heading">
       <div class="panel-title"><div class="eyebrow">{{ connection.name }} · DB {{ db }}</div><h1><Terminal :size="23" />Redis CLI</h1></div>
       <div class="heading-actions">
-        <button v-if="mode" @click="stop()"><Square :size="14" />{{ tr('停止接收', 'Stop feed') }}</button>
-        <button :disabled="busy" @click="fileInput.click()"><Upload :size="15" />{{ tr('执行文件', 'Run file') }}</button>
-        <button @click="entries = []"><Eraser :size="16" />{{ tr('清屏', 'Clear') }}</button>
+        <NButton size="small" v-if="mode" @click="stop()"><Square :size="14" />{{ tr('停止接收', 'Stop feed') }}</NButton>
+        <NButton size="small" :disabled="busy" @click="fileInput.click()"><Upload :size="15" />{{ tr('执行文件', 'Run file') }}</NButton>
+        <NButton size="small" @click="entries = []"><Eraser :size="16" />{{ tr('清屏', 'Clear') }}</NButton>
         <input ref="fileInput" type="file" hidden @change="runFile">
       </div>
     </header>
@@ -202,7 +202,7 @@ onUnmounted(() => {
         <span>DB {{ db }} ›</span>
         <input ref="input" v-model="text" :list="'commands-' + tab.id" :aria-label="tr('Redis 命令', 'Redis command')" spellcheck="false" autocomplete="off" @keydown="keys">
         <datalist :id="'commands-' + tab.id"><option v-for="item in suggestions" :key="item" :value="item"></option></datalist>
-        <button class="primary" :disabled="busy || !text.trim()"><Play :size="14" />{{ tr('执行', 'Run') }}</button>
+        <NButton size="small" type="primary" attr-type="submit" class="primary" :disabled="busy || !text.trim()"><Play :size="14" />{{ tr('执行', 'Run') }}</NButton>
       </form>
     </div>
   </div>

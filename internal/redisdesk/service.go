@@ -190,7 +190,8 @@ func readOnlyCommand(args []string) bool {
 		"ZSCAN", "ZCARD", "ZRANGE", "ZREVRANGE", "ZRANGEBYSCORE", "ZREVRANGEBYSCORE", "ZRANGEBYLEX", "ZCOUNT", "ZSCORE", "ZMSCORE", "ZRANK", "ZREVRANK", "ZRANDMEMBER",
 		"XLEN", "XRANGE", "XREVRANGE", "XPENDING", "XREAD", "JSON.GET", "JSON.MGET", "JSON.TYPE", "JSON.OBJKEYS", "JSON.OBJLEN", "JSON.ARRLEN",
 		"TS.INFO", "TS.GET", "TS.RANGE", "TS.REVRANGE", "VINFO", "VCARD", "VDIM", "VRANGE", "VRANDMEMBER", "VEMB", "VGETATTR", "VSIM",
-		"ARINFO", "ARLEN", "ARCOUNT", "ARGET", "ARMGET", "ARRANGE", "ARSCAN", "ARGREP", "SUBSCRIBE", "PSUBSCRIBE":
+		"ARINFO", "ARLEN", "ARCOUNT", "ARGET", "ARMGET", "ARRANGE", "ARSCAN", "ARGREP", "SUBSCRIBE", "PSUBSCRIBE",
+		"FT._LIST", "FT.INFO", "FT.SEARCH", "FT.AGGREGATE", "FT.EXPLAIN", "FT.PROFILE":
 		return true
 	}
 	if len(args) < 2 {
@@ -260,6 +261,12 @@ func (s *Service) command(ctx context.Context, id string, db int, input []Argume
 	if errors.Is(err, redis.Nil) {
 		err = nil
 	}
+	s.recordCommand(id, db, command, start, err)
+	return wireReply(result), err
+}
+
+// recordCommand records timing and status without storing arguments or data values.
+func (s *Service) recordCommand(id string, db int, command string, start time.Time, err error) {
 	entry := LogEntry{Time: start.Format(time.RFC3339Nano), Session: id, Database: db, Command: command, ElapsedMS: time.Since(start).Milliseconds()}
 	if err != nil {
 		entry.Error = err.Error()
@@ -271,7 +278,6 @@ func (s *Service) command(ctx context.Context, id string, db int, input []Argume
 	}
 	s.logs = append(s.logs, entry)
 	s.mu.Unlock()
-	return wireReply(result), err
 }
 
 // Logs returns recent commands with newest first and excludes argument values.

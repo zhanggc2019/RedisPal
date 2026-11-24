@@ -24,10 +24,12 @@ foreach ($arch in 'amd64', 'arm64') {
 
 ## 功能
 
-- 单机、Cluster、Sentinel、ACL、SSH 和 TLS 连接，支持分组、克隆、连通性测试和只读模式。SSH 使用系统或指定的 `known_hosts` 文件验证主机密钥。
-- 数据库切换和命名、键的精确及通配符搜索、树形及平铺视图、分页、批量删除、导入导出。键备份读取新版 JSON 和原 Electron 版 CSV，支持将键复制到同连接的其他库或通过备份迁移到其他连接。
+- 单机、Cluster、Sentinel、ACL、SSH 和 TLS 连接，支持分组、克隆、连通性测试和只读模式。可将已有连接拖到左侧分组标题。SSH 使用系统或指定的 `known_hosts` 文件验证主机密钥。
+- 数据库切换和命名、键的精确及通配符搜索、树形及平铺视图、分页、批量删除、导入导出。键列表默认每批加载 10,000 个键。键备份读取新版 JSON 和原 Electron 版 CSV，支持将键复制到同连接的其他库或通过备份迁移到其他连接。
 - String、Hash、List、Set、ZSet、Stream、RedisJSON、TimeSeries、Vector Set 和 Array 的可视化编辑。扩展类型及 Hash 字段 TTL 需要 Redis 服务器支持对应命令。
-- Redis CLI、历史、补全、命令文件、Pub/Sub、MONITOR、命令日志、慢日志和内存分析。Cluster 的 MONITOR 观察一个主节点。
+- Redis CLI 支持历史、补全和命令文件。「数据库操作」菜单可打开 Pub/Sub、Redis Search、实时监控、慢日志和内存分析。Pub/Sub 支持普通、模式和分片订阅。
+- Redis Search 支持浏览和创建索引、字段补全、查询收藏、Explain 和 Profile，需要 Redis 服务端提供 `FT.*`。Stream 详情支持实时刷新、消费组和待处理消息管理。
+- 实时监控支持筛选和导出，Cluster 连接观察一个主节点。慢日志支持自动刷新以及按主节点读取和修改阈值与日志长度，依赖服务端 ACL 权限。
 - Text、JSON、Hex、Binary、MessagePack、PHP、Java、Pickle、Protobuf 和压缩格式视图。自定义格式化器直接启动指定程序，将值通过标准输入传入。
 - 浅色、深色、系统主题，字体、缩放和快捷键。界面支持简体中文和英文，首次启动及旧语言设置回退时使用简体中文。
 
@@ -45,6 +47,8 @@ npm.cmd --prefix frontend run test:desktop
 Playwright 连接独立测试版 EXE 的 WebView2，直接操作界面并通过 Wails 调用 Redis。生产版构建不包含该测试接口。测试创建带有 `ardm-wails-` 前缀的临时键，并清理本轮创建的键。Go 的 TLS 和 SSH 测试会启动临时本地代理。
 
 可选环境变量 `REDIS_TEST_CLUSTER` 指向测试 Cluster，`REDIS_TEST_SENTINEL` 指向主节点名为 `ardm` 的 Sentinel。设置 `REDIS_TEST_MODULES` 和 `REDIS_TEST_NATIVE` 可运行 RedisJSON、TimeSeries、Vector Set 和 Array 的桌面测试。
+
+使用支持 Search 和 JSON 的临时测试实例时，可将 `REDIS_TEST_ADDR` 指向该实例，并设置 `REDIS_TEST_ISOLATED=1` 来验证索引与示例数据创建、慢日志配置写入。运行完成后销毁临时实例。
 
 ## GitHub Actions 与标签发布
 

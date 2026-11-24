@@ -145,23 +145,24 @@ defineExpose({ getValue })
       <select v-if="!fixed" :value="mode" :aria-label="tr('值格式', 'Value format')" @change="changeFormat">
         <option v-for="format in formats" :key="format" :value="format">{{ format }}</option>
       </select>
-      <span v-else class="badge">{{ fixed }}</span>
-      <button v-if="mode === 'Protobuf'" type="button" @click="protoInput.click()"><Upload :size="14" /> .proto</button>
-      <button v-if="mode === 'Protobuf' && schema" type="button" @click="clearSchema">{{ tr('移除 Schema', 'Clear schema') }}</button>
+      <NTag v-else size="small" type="primary" :bordered="false">{{ fixed }}</NTag>
+      <NButton size="small" v-if="mode === 'Protobuf'" @click="protoInput.click()"><Upload :size="14" /> .proto</NButton>
+      <NButton size="small" v-if="mode === 'Protobuf' && schema" @click="clearSchema">{{ tr('移除 Schema', 'Clear schema') }}</NButton>
       <template v-if="mode === 'Custom'">
-        <button type="button" @click="runCustom()"><Play :size="14" />{{ tr('运行', 'Run') }}</button>
-        <button type="button" @click="runCustom(true)">{{ tr('配置', 'Configure') }}</button>
+        <NButton size="small" @click="runCustom()"><Play :size="14" />{{ tr('运行', 'Run') }}</NButton>
+        <NButton size="small" @click="runCustom(true)">{{ tr('配置', 'Configure') }}</NButton>
       </template>
       <span class="muted editor-bytes">{{ byteLength.toLocaleString() }} B</span>
       <span class="spacer"></span>
-      <button class="flat icon" type="button" :title="tr('复制值', 'Copy value')" @click="copy"><Copy :size="15" /></button>
-      <button class="flat icon" type="button" :title="tr('保存原始值到文件', 'Download raw value')" @click="download('redis-value.bin', toBytes(value ?? ''), 'application/octet-stream')"><Download :size="15" /></button>
+      <NButton size="small" quaternary class="flat icon" :title="tr('复制值', 'Copy value')" @click="copy"><Copy :size="15" /></NButton>
+      <NButton size="small" quaternary class="flat icon" :title="tr('保存原始值到文件', 'Download raw value')" @click="download('redis-value.bin', toBytes(value ?? ''), 'application/octet-stream')"><Download :size="15" /></NButton>
       <input ref="protoInput" type="file" hidden multiple accept=".proto" @change="loadProto">
     </div>
     <p v-if="failure" class="notice error">{{ failure }}</p>
     <div v-if="oversized" class="empty-panel">
-      <button type="button" @click="showFull = true; refresh()">{{ tr('加载完整值', 'Load full value') }}</button>
+      <NButton size="small" @click="showFull = true; refresh()">{{ tr('加载完整值', 'Load full value') }}</NButton>
     </div>
-    <textarea v-else v-model="text" :aria-label="label || tr('值', 'Value')" :readonly="!writable" spellcheck="false"></textarea>
+    <NInput v-else v-model:value="text" class="editor-input" type="textarea" :rows="compact ? 7 : 13"
+      :readonly="!writable" :input-props="{ 'aria-label': label || tr('值', 'Value'), spellcheck: false }" />
   </div>
 </template>

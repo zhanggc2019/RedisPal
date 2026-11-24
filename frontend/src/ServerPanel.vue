@@ -58,8 +58,8 @@ onUnmounted(() => clearInterval(timer))
         <h1><Server :size="23" />{{ connection.name }}</h1>
       </div>
       <div class="heading-actions">
-        <label class="soft-check"><input v-model="auto" type="checkbox"> {{ tr('自动刷新', 'Auto-refresh') }}</label>
-        <button @click="refresh()"><RefreshCw :size="15" :class="{ spin: busy }" />{{ tr('刷新', 'Refresh') }}</button>
+        <label class="soft-check"><NSwitch v-model:value="auto" size="small" :aria-label="tr('自动刷新', 'Auto-refresh')" /> {{ tr('自动刷新', 'Auto-refresh') }}</label>
+        <NButton size="small" @click="refresh()"><RefreshCw :size="15" :class="{ spin: busy }" />{{ tr('刷新', 'Refresh') }}</NButton>
       </div>
     </header>
     <div class="server-summary">
@@ -69,10 +69,10 @@ onUnmounted(() => clearInterval(timer))
       <div><span>{{ tr('运行天数', 'Uptime (days)') }}</span><strong>{{ fields.uptime_in_days || '0' }}</strong></div>
     </div>
     <div class="metric-grid">
-      <article v-for="card in cards" :key="card.label" class="metric">
-        <div><component :is="card.icon" :size="17" /><span>{{ card.label }}</span></div>
+      <NCard v-for="card in cards" :key="card.label" size="small" class="metric">
+        <div class="metric-label"><component :is="card.icon" :size="17" /><span>{{ card.label }}</span></div>
         <strong>{{ card.value ?? '—' }}</strong><small>{{ card.detail }}</small>
-      </article>
+      </NCard>
     </div>
     <div class="info-box">
       <header><Cpu :size="17" /><h2>{{ tr('操作活动', 'Command activity') }}</h2><span class="spacer"></span><span class="muted">{{ tr('峰值', 'Peak') }} {{ maximum }}</span></header>
@@ -82,7 +82,7 @@ onUnmounted(() => clearInterval(timer))
     </div>
     <div class="info-box">
       <header><Activity :size="17" /><h2>{{ tr('服务器信息', 'Server information') }}</h2><span class="spacer"></span>
-        <button class="flat" :aria-pressed="raw" @click="raw = !raw">{{ raw ? tr('分类查看', 'Show sections') : tr('原始 INFO', 'Raw INFO') }}</button></header>
+        <NButton size="small" quaternary class="flat" :aria-pressed="raw" @click="raw = !raw">{{ raw ? tr('分类查看', 'Show sections') : tr('原始 INFO', 'Raw INFO') }}</NButton></header>
       <pre v-if="raw">{{ info.info }}</pre>
       <div v-else class="info-sections">
         <details v-for="(values, title) in sections" :key="title" :open="title === 'Server'">

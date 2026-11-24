@@ -90,6 +90,11 @@ func (s *Service) StartFeed(ctx context.Context, id string, db int, token, mode 
 					return
 				case message, ok := <-sub.Channel():
 					if !ok {
+						if feedCtx.Err() == nil {
+							stream.mu.Lock()
+							stream.err = "Redis subscription closed"
+							stream.mu.Unlock()
+						}
 						return
 					}
 					stream.push(message.Channel, wireString(message.Payload))

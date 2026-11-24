@@ -1,13 +1,14 @@
 <script setup>
-import { computed, inject, onMounted, reactive, ref } from 'vue'
+import { computed, inject, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ChevronRight, Clock3, Copy, Download, Info, KeyRound, Pencil, Plus, RefreshCw, Save, Search, Trash2, X } from '@lucide/vue'
 import { call, Clipboard, command } from './api.js'
 import { asArg, display, download, fromBytes, identity, toBytes } from './model.js'
 import { pretty } from './formats.js'
 import { countRows, createKey, editRow, listedRows, redisTypes, removeRow, rowCommands, typeName } from './keydata.js'
+import StreamGroups from './StreamGroups.vue'
 import ValueEditor from './ValueEditor.vue'
 
-const props = defineProps({ tab: Object, connection: Object })
+const props = defineProps({ tab: Object, connection: Object, visible: Boolean })
 const emit = defineEmits(['change', 'refresh-list', 'open-key'])
 const tr = inject('tr')
 const ask = inject('ask')
@@ -28,6 +29,11 @@ const name = ref(isNew ? '' : display(key))
 const binaryKey = ref(typeof key === 'object')
 const filter = ref('')
 const range = reactive({ from: '', to: '' })
+const streamView = ref('entries')
+const streamQuery = ref({ filter: '', range: { from: '', to: '' } })
+const streamLive = ref(false)
+const streamInterval = ref(2)
+const streamError = ref('')
 const editor = ref(null)
 const rowEditor = ref(null)
 const rowDialog = ref(null)
@@ -38,7 +44,11 @@ const hasField = computed(() => ['hash', 'vectorset'].includes(type.value))
 const hasIndex = computed(() => ['array', 'stream', 'TSDB-TYPE'].includes(type.value))
 const isScalar = computed(() => ['string', 'ReJSON-RL'].includes(type.value))
 const supportsRows = computed(() => redisTypes.includes(type.value) && !isScalar.value)
+const showStreamGroups = computed(() => type.value === 'stream' && streamView.value === 'groups')
+const pollingStream = computed(() => props.visible && type.value === 'stream' && streamView.value === 'entries' && streamLive.value && !rowDialog.value)
 let revision = 0
+let streamTimer
+let refreshingStream = false
 
 /** Run a Redis command in this tab's original database. */
 function run(...args) {
@@ -86,13 +96,18 @@ async function loadRows(reset = false, expected = ++revision) {
   if (reset) {
     rows.value = []
     next.value = null
+    if (type.value === 'stream') {
+      streamQuery.value = { filter: filter.value, range: { ...range } }
+      streamError.value = ''
+    }
   }
   loading.value = true
   error.value = ''
   const seen = new Set(rows.value.map(row => identity(row.field ?? row.index ?? row.value)))
   try {
     do {
-      const page = await listedRows(run, type.value, key, next.value, filter.value, range)
+      const query = type.value === 'stream' ? streamQuery.value : { filter: filter.value, range }
+      const page = await listedRows(run, type.value, key, next.value, query.filter, query.range)
       if (expected !== revision) return
       next.value = page.cursor
       for (const row of page.rows) {
@@ -108,6 +123,37 @@ async function loadRows(reset = false, expected = ++revision) {
     if (expected === revision) loading.value = false
   }
 }
+
+/** Replace the live window with the latest entries in the last submitted range. */
+async function refreshStream() {
+  if (!pollingStream.value || loading.value || saving.value || refreshingStream) return
+  const expected = revision
+  refreshingStream = true
+  try {
+    const query = streamQuery.value
+    const [page, length] = await Promise.all([
+      listedRows(run, 'stream', key, null, query.filter, query.range),
+      countRows(run, 'stream', key),
+    ])
+    if (expected !== revision || !pollingStream.value) return
+    rows.value = page.rows
+    next.value = page.cursor
+    count.value = length
+    streamError.value = ''
+  } catch (failure) {
+    if (expected === revision && pollingStream.value) streamError.value = failure.message
+  } finally {
+    refreshingStream = false
+  }
+}
+
+/** Poll only while the visible Stream tab is showing entries. */
+watch([pollingStream, streamInterval], ([enabled, seconds]) => {
+  clearInterval(streamTimer)
+  if (!enabled) return
+  refreshStream()
+  streamTimer = setInterval(refreshStream, seconds * 1000)
+})
 
 /** Create a key or save an edited string/JSON while preserving its existing expiration. */
 async function saveKey() {
@@ -288,16 +334,15 @@ async function fieldTTL(row) {
   }
 }
 
-/** Show module metadata or stream group/consumer information. */
-async function details(mode, group = '') {
+/** Show metadata for the current Redis type. */
+async function details(mode) {
   const args = {
-    stream: ['XINFO', 'STREAM', key], groups: ['XINFO', 'GROUPS', key], consumers: ['XINFO', 'CONSUMERS', key, group],
+    stream: ['XINFO', 'STREAM', key],
     'TSDB-TYPE': ['TS.INFO', key], vectorset: ['VINFO', key], array: ['ARINFO', key],
   }
   try {
     const data = await run(...args[mode])
-    const groups = mode === 'groups' ? data.map(entries => entries[entries.indexOf('name') + 1]) : []
-    extra.value = { mode, data: pretty(data), groups }
+    extra.value = { data: pretty(data) }
   } catch (failure) {
     notify(failure, true)
   }
@@ -311,7 +356,7 @@ async function similarity() {
     const values = text.trim().split(/[\s,]+/)
     if (values.some(value => !Number.isFinite(Number(value)))) throw new Error('Invalid vector values')
     const data = await run('VSIM', key, 'VALUES', values.length, ...values, 'WITHSCORES', 'COUNT', 30)
-    extra.value = { mode: 'VSIM', data: pretty(data), groups: [] }
+    extra.value = { data: pretty(data) }
   } catch (failure) {
     notify(failure, true)
   }
@@ -330,6 +375,10 @@ async function copyName() {
 }
 
 onMounted(() => { if (!isNew) load() })
+onUnmounted(() => {
+  revision++
+  clearInterval(streamTimer)
+})
 </script>
 
 <template>
@@ -340,10 +389,10 @@ onMounted(() => { if (!isNew) load() })
         <h1><KeyRound :size="22" />{{ isNew ? tr('新建 Key', 'New key') : display(key) || '␀' }}</h1>
       </div>
       <div v-if="!isNew" class="heading-actions">
-        <button class="icon" :title="tr('复制键名', 'Copy key name')" @click="copyName"><Copy :size="16" /></button>
-        <button class="icon" :title="tr('导出键', 'Export key')" @click="exportKey"><Download :size="16" /></button>
-        <button class="icon" :title="tr('刷新键', 'Refresh key')" @click="load"><RefreshCw :size="16" :class="{ spin: loading }" /></button>
-        <button class="icon danger" :title="tr('删除键', 'Delete key')" :aria-label="tr('删除键', 'Delete key')" :disabled="connection.readOnly || type === 'none'" @click="deleteKey"><Trash2 :size="16" /></button>
+        <NButton size="small" class="icon" :title="tr('复制键名', 'Copy key name')" @click="copyName"><Copy :size="16" /></NButton>
+        <NButton size="small" class="icon" :title="tr('导出键', 'Export key')" @click="exportKey"><Download :size="16" /></NButton>
+        <NButton size="small" class="icon" :title="tr('刷新键', 'Refresh key')" @click="load"><RefreshCw :size="16" :class="{ spin: loading }" /></NButton>
+        <NButton size="small" type="error" class="icon danger" :title="tr('删除键', 'Delete key')" :aria-label="tr('删除键', 'Delete key')" :disabled="connection.readOnly || type === 'none'" @click="deleteKey"><Trash2 :size="16" /></NButton>
       </div>
     </header>
 
@@ -362,7 +411,7 @@ onMounted(() => { if (!isNew) load() })
         <label v-if="type === 'vectorset'">{{ tr('属性 JSON', 'Attribute JSON') }}<input v-model="draft.attributes" placeholder="{}"></label>
       </div>
       <ValueEditor :key="type" ref="editor" :value="value ?? ''" :fixed="type === 'stream' || type === 'ReJSON-RL' ? 'JSON' : ''" compact />
-      <div class="form-actions"><button class="primary" type="submit" :disabled="saving"><Save :size="16" />{{ tr('创建键', 'Create key') }}</button></div>
+      <div class="form-actions"><NButton size="small" type="primary" attr-type="submit" class="primary" :disabled="saving"><Save :size="16" />{{ tr('创建键', 'Create key') }}</NButton></div>
     </form>
 
     <template v-else>
@@ -375,32 +424,47 @@ onMounted(() => { if (!isNew) load() })
           <span class="muted" v-if="count !== null">{{ count.toLocaleString() }} {{ tr('条', 'entries') }}</span>
           <span class="spacer"></span>
           <label class="ttl-field"><Clock3 :size="15" />TTL <input v-model.number="ttl" type="number" min="-1" aria-label="TTL" :readonly="connection.readOnly" @keydown.enter="!connection.readOnly && saveTTL()"></label>
-          <button :disabled="connection.readOnly" @click="saveTTL">{{ tr('更新 TTL', 'Update TTL') }}</button>
-          <button :disabled="connection.readOnly" @click="rename"><Pencil :size="14" />{{ tr('重命名', 'Rename') }}</button>
-          <button :disabled="connection.readOnly" @click="copyKey">{{ tr('复制到…', 'Copy to…') }}</button>
+          <NButton size="small" :disabled="connection.readOnly" @click="saveTTL">{{ tr('更新 TTL', 'Update TTL') }}</NButton>
+          <NButton size="small" :disabled="connection.readOnly" @click="rename"><Pencil :size="14" />{{ tr('重命名', 'Rename') }}</NButton>
+          <NButton size="small" :disabled="connection.readOnly" @click="copyKey">{{ tr('复制到…', 'Copy to…') }}</NButton>
         </div>
         <template v-if="isScalar">
           <ValueEditor ref="editor" :value="value" :read-only="connection.readOnly" :fixed="type === 'ReJSON-RL' ? 'JSON' : ''" :scope="scope" />
           <div v-if="!connection.readOnly" class="form-actions">
-            <button class="primary" :disabled="saving || loading || value === null" @click="saveKey"><Save :size="16" />{{ tr('保存值', 'Save value') }}</button>
+            <NButton size="small" type="primary" class="primary" :disabled="saving || loading || value === null" @click="saveKey"><Save :size="16" />{{ tr('保存值', 'Save value') }}</NButton>
           </div>
         </template>
+        <div v-if="type === 'stream'" class="row-tools" role="group" :aria-label="tr('Stream 视图', 'Stream view')">
+          <NButton size="small" :type="streamView === 'entries' ? 'primary' : 'default'" :aria-pressed="streamView === 'entries'" @click="streamView = 'entries'">{{ tr('消息条目', 'Stream entries') }}</NButton>
+          <NButton size="small" :type="showStreamGroups ? 'primary' : 'default'" :aria-pressed="showStreamGroups" @click="streamView = 'groups'">{{ tr('消费组', 'Consumer groups') }}</NButton>
+          <span class="spacer"></span>
+          <template v-if="!showStreamGroups">
+            <label class="soft-check">
+              <NSwitch v-model:value="streamLive" size="small" :aria-label="tr('实时刷新', 'Live refresh')" />
+              {{ tr('实时刷新', 'Live refresh') }}
+            </label>
+            <select v-if="streamLive" v-model.number="streamInterval" :aria-label="tr('刷新间隔', 'Refresh interval')">
+              <option v-for="seconds in [1, 2, 5, 10]" :key="seconds" :value="seconds">{{ seconds }} {{ tr('秒', 's') }}</option>
+            </select>
+          </template>
+        </div>
+        <StreamGroups v-if="showStreamGroups" :stream-key="key" :run="run" :read-only="connection.readOnly" />
         <template v-else-if="supportsRows">
+          <p v-if="streamLive && streamError" class="notice error" role="alert">{{ streamError }}</p>
           <form class="row-tools" @submit.prevent="loadRows(true)">
             <div v-if="type !== 'TSDB-TYPE'" class="search-field"><Search :size="15" /><input v-model="filter" :placeholder="tr('搜索条目', 'Filter entries')" spellcheck="false"></div>
             <template v-if="type === 'stream' || type === 'TSDB-TYPE'">
               <input v-model="range.from" class="range" :placeholder="tr('起始 ID / 时间戳', 'Start ID / timestamp')">
               <input v-model="range.to" class="range" :placeholder="tr('结束 ID / 时间戳', 'End ID / timestamp')">
             </template>
-            <button type="submit" :disabled="loading">{{ tr('查询', 'Search') }}</button>
+            <NButton size="small" attr-type="submit" :disabled="loading">{{ tr('查询', 'Search') }}</NButton>
             <span class="spacer"></span>
-            <button v-if="type === 'stream' || type === 'TSDB-TYPE' || type === 'vectorset' || type === 'array'" type="button" @click="details(type)"><Info :size="15" />{{ tr('信息', 'Info') }}</button>
-            <button v-if="type === 'stream'" type="button" @click="details('groups')">{{ tr('消费组', 'Groups') }}</button>
-            <button v-if="type === 'vectorset'" type="button" @click="similarity">{{ tr('相似度', 'Similarity') }}</button>
-            <button type="button" class="primary" :disabled="connection.readOnly" @click="showRow()"><Plus :size="16" />{{ tr('添加条目', 'Add entry') }}</button>
+            <NButton size="small" v-if="type === 'stream' || type === 'TSDB-TYPE' || type === 'vectorset' || type === 'array'" @click="details(type)"><Info :size="15" />{{ tr('信息', 'Info') }}</NButton>
+            <NButton size="small" v-if="type === 'vectorset'" @click="similarity">{{ tr('相似度', 'Similarity') }}</NButton>
+            <NButton size="small" type="primary" class="primary" :disabled="connection.readOnly" @click="showRow()"><Plus :size="16" />{{ tr('添加条目', 'Add entry') }}</NButton>
           </form>
           <div class="table-wrap">
-            <table class="data-table">
+            <NTable size="small" :bordered="false" class="data-table">
               <thead><tr>
                 <th v-if="hasField">{{ tr('字段 / 元素', 'Field / element') }}</th>
                 <th v-if="hasIndex || type === 'list'">{{ tr('序号 / ID', 'Index / ID') }}</th>
@@ -414,17 +478,17 @@ onMounted(() => { if (!isNew) load() })
                   <td v-if="type !== 'vectorset'" class="table-value mono" :title="display(row.value)">{{ display(row.value) }}</td>
                   <td v-if="type === 'zset'" class="mono">{{ row.score }}</td>
                   <td class="row-ops">
-                    <button class="flat icon" :title="tr('查看条目', 'View entry')" @click="showRow(row, true)"><Info :size="15" /></button>
-                    <button v-if="type !== 'stream'" class="flat icon" :title="tr('编辑条目', 'Edit entry')" :disabled="connection.readOnly" @click="showRow(row)"><Pencil :size="15" /></button>
-                    <button v-if="type === 'hash'" class="flat icon" :title="tr('字段 TTL', 'Field TTL')" @click="fieldTTL(row)"><Clock3 :size="15" /></button>
-                    <button class="flat icon danger" :title="tr('删除条目', 'Delete entry')" :disabled="connection.readOnly" @click="deleteRow(row)"><Trash2 :size="15" /></button>
+                    <NButton size="small" quaternary class="flat icon" :title="tr('查看条目', 'View entry')" @click="showRow(row, true)"><Info :size="15" /></NButton>
+                    <NButton size="small" quaternary v-if="type !== 'stream'" class="flat icon" :title="tr('编辑条目', 'Edit entry')" :disabled="connection.readOnly" @click="showRow(row)"><Pencil :size="15" /></NButton>
+                    <NButton size="small" quaternary v-if="type === 'hash'" class="flat icon" :title="tr('字段 TTL', 'Field TTL')" @click="fieldTTL(row)"><Clock3 :size="15" /></NButton>
+                    <NButton size="small" quaternary type="error" class="flat icon danger" :title="tr('删除条目', 'Delete entry')" :disabled="connection.readOnly" @click="deleteRow(row)"><Trash2 :size="15" /></NButton>
                   </td>
                 </tr>
                 <tr v-if="!rows.length"><td colspan="5" class="empty-cell">{{ loading ? tr('正在加载…', 'Loading…') : tr('没有符合条件的条目', 'No matching entries') }}</td></tr>
               </tbody>
-            </table>
+            </NTable>
           </div>
-          <div v-if="next !== null" class="form-actions"><button :disabled="loading" @click="loadRows()">{{ tr('加载更多', 'Load more') }}</button></div>
+          <div v-if="next !== null && !(type === 'stream' && streamLive)" class="form-actions"><NButton size="small" :disabled="loading" @click="loadRows()">{{ tr('加载更多', 'Load more') }}</NButton></div>
         </template>
         <p v-else class="notice">{{ tr('可在命令行中操作此 Redis 类型。', 'Use the CLI to work with this Redis type.') }}</p>
       </div>
@@ -432,12 +496,11 @@ onMounted(() => { if (!isNew) load() })
     </template>
   </div>
 
-  <Teleport to="#overlay-host">
-    <div v-if="rowDialog" class="modal-backdrop" @click.self="rowDialog = null" @keydown.esc="rowDialog = null">
+    <WorkspaceDialog v-if="rowDialog" @close="rowDialog = null">
       <form class="modal wide-modal" aria-modal="true" role="dialog" @submit.prevent="saveRow">
         <header class="modal-header">
           <h2>{{ rowDialog.view ? tr('查看条目', 'View entry') : rowDialog.original ? tr('编辑条目', 'Edit entry') : tr('添加条目', 'Add entry') }}</h2>
-          <button class="flat icon" type="button" @click="rowDialog = null"><X :size="19" /></button>
+          <NButton size="small" quaternary class="flat icon" @click="rowDialog = null"><X :size="19" /></NButton>
         </header>
         <div class="modal-body">
           <div v-if="hasField || hasIndex || type === 'zset' || type === 'list' && !rowDialog.original" class="form-grid">
@@ -451,19 +514,16 @@ onMounted(() => { if (!isNew) load() })
           <ValueEditor ref="rowEditor" :value="rowDialog.data" :read-only="rowDialog.view || type === 'vectorset' && Boolean(rowDialog.original)"
             :fixed="type === 'stream' ? 'JSON' : ''" :scope="scope" compact />
         </div>
-        <footer class="modal-footer end"><button type="button" @click="rowDialog = null">{{ tr('关闭', 'Close') }}</button>
-          <button v-if="!rowDialog.view" class="primary" :disabled="saving" type="submit">{{ tr('保存', 'Save') }}</button>
+        <footer class="modal-footer end"><NButton size="small" @click="rowDialog = null">{{ tr('关闭', 'Close') }}</NButton>
+          <NButton size="small" type="primary" attr-type="submit" v-if="!rowDialog.view" class="primary" :disabled="saving">{{ tr('保存', 'Save') }}</NButton>
         </footer>
       </form>
-    </div>
-    <div v-if="extra" class="modal-backdrop" @click.self="extra = null" @keydown.esc="extra = null">
+    </WorkspaceDialog>
+    <WorkspaceDialog v-if="extra" @close="extra = null">
       <section class="modal wide-modal" role="dialog" aria-modal="true">
-        <header class="modal-header"><h2>{{ extra.mode === 'groups' ? tr('消费组', 'Groups') : tr('详细信息', 'Details') }}</h2>
-          <button class="flat icon" @click="extra = null"><X :size="19" /></button></header>
-        <div class="modal-body"><div v-if="extra.groups.length" class="row-tools">
-          <button v-for="group in extra.groups" :key="display(group)" @click="details('consumers', group)">{{ tr('消费者', 'Consumers') }} · {{ display(group) }}</button>
-        </div><pre>{{ extra.data }}</pre></div>
+        <header class="modal-header"><h2>{{ tr('详细信息', 'Details') }}</h2>
+          <NButton size="small" quaternary class="flat icon" @click="extra = null"><X :size="19" /></NButton></header>
+        <div class="modal-body"><pre>{{ extra.data }}</pre></div>
       </section>
-    </div>
-  </Teleport>
+    </WorkspaceDialog>
 </template>

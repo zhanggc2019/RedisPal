@@ -67,17 +67,17 @@ onUnmounted(() => observer?.disconnect())
       :class="{ current: node.value !== undefined && identity(node.value) === active }"
       :style="{ paddingLeft: 7 + depth * 15 + 'px' }"
       @keydown.enter.self="activate(node)" @keydown="navigate($event, node, start + index)">
-      <button v-if="node.children.length" class="icon flat folder-toggle" :aria-label="node.title"
+      <NButton size="small" quaternary v-if="node.children.length" class="icon flat folder-toggle" :aria-label="node.title"
         :aria-expanded="expanded.has(node.id)" @click="emit('toggle', node.id)">
         <ChevronDown v-if="expanded.has(node.id)" :size="13" /><ChevronRight v-else :size="13" />
-      </button>
+      </NButton>
       <span v-else class="tree-spacer"></span>
       <input v-if="multi && node.value !== undefined" type="checkbox" :aria-label="display(node.value)"
         :checked="selected.has(identity(node.value))" @change="emit('check', node.value)">
-      <button class="flat tree-key" :title="node.value === undefined ? node.title : display(node.value)" @click="activate(node)">
+      <NButton size="small" quaternary class="flat tree-key" :title="node.value === undefined ? node.title : display(node.value)" @click="activate(node)">
         <Folder v-if="node.children.length" :size="14" /><KeyRound v-else :size="13" />
         <span>{{ node.title || '␀' }}</span>
-      </button>
+      </NButton>
     </div>
     <div v-if="end < rows.length" :style="{ height: (rows.length - end) * rowHeight + 'px' }"></div>
   </div>
