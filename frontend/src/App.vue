@@ -1,12 +1,12 @@
 <script setup>
-import { computed, onMounted, onUnmounted, provide, reactive, ref, watch } from 'vue'
+import { computed, markRaw, onMounted, onUnmounted, provide, reactive, ref, shallowReactive, watch } from 'vue'
 import { darkTheme, enUS, NConfigProvider, zhCN } from 'naive-ui'
 import {
   Activity, ChevronDown, ChevronRight, CircleCheck, CircleHelp, Database, Download, Ellipsis, Folder, FolderPlus,
   KeyRound, List, ListChecks, Network, Plus, Radio, RefreshCw, Search, Server, Settings, Terminal, Trash2, Upload, X,
 } from '@lucide/vue'
 import { Application, Browser, call, desktopCall, Events, updateCall, Window } from './api.js'
-import { asArg, decodeBackup, display, download, identity, keyTree, normalizeConnections } from './model.js'
+import { asArg, createKeyTreeIndex, decodeBackup, display, download, identity, normalizeConnections, scanKeyBatches } from './model.js'
 import { normalizeLanguage } from './locale.js'
 import { appearance, normalizePreset, themePresets } from './theme.js'
 import ConnectionDialog from './ConnectionDialog.vue'
@@ -163,9 +163,6 @@ const visibleGroups = computed(() => [...groups.value, { id: '', name: tr('未�
   connections: connections.value.filter(item => (item.groupId || '') === group.id &&
     (item.name + ' ' + item.addr).toLowerCase().includes(connectionFilter.value.trim().toLowerCase())),
 })).filter(group => group.id ? !connectionFilter.value || group.connections.length : group.connections.length))
-const tree = computed(() => session.value ? keyTree(
-  session.value.keys, session.value.tree ? connection.value?.separator : '',
-) : [])
 const selectedKeys = computed(() => session.value?.keys.filter(key => session.value.selected.has(identity(key))) || [])
 
 /** Open an empty editor or a copy of the selected connection. */
@@ -206,8 +203,9 @@ async function connect(item) {
     const info = await call('Info', item.id, 0)
     const db = info.databases.includes(item.lastDb) ? item.lastDb : 0
     sessions[item.id] = {
-      connecting: false, db, info, keys: [], pendingKeys: [], cursor: '', query: '', exact: false, tree: Boolean(item.separator),
-      expanded: new Set(), selected: new Set(), seen: new Set(), multi: false, loading: false, revision: 0, sorting: false,
+      connecting: false, db, info, keys: shallowReactive([]), pendingKeys: shallowReactive([]), cursor: '', query: '', exact: false,
+      tree: Boolean(item.separator), keyIndex: null, expanded: new Set(), selected: new Set(), seen: markRaw(new Set()),
+      multi: false, loading: false, revision: 0, sorting: false,
       history: item.searchHistory || [],
     }
     if (selectedId.value === item.id) openTab({ kind: 'server', connection: item.id })
@@ -334,44 +332,38 @@ async function exportConnections() {
   download('redis-connections.json', JSON.stringify({ connections: connections.value.filter(item => !item.temporary), groups: groups.value }, null, 2))
 }
 
+function indexKeys(state, separator, keys) {
+  const index = state.tree && separator ? markRaw(createKeyTreeIndex(separator)) : null
+  index?.append(keys)
+  state.keyIndex = index
+}
+
 /** Fill one key-list batch and carry overflow from Redis SCAN into subsequent batches. */
 async function scan(id, reset = false, all = false) {
   const state = sessions[id]
   if (!state || state.connecting || (state.loading && !reset) || (!reset && !state.cursor && !state.pendingKeys.length)) return
+  const { separator } = connections.value.find(item => item.id === id)
   if (reset) {
-    state.keys = []
-    state.pendingKeys = []
-    state.cursor = ''
-    state.seen.clear()
+    indexKeys(state, separator, [])
     state.selected.clear()
   }
   const revision = ++state.revision
+  const isCurrent = () => revision === state.revision && sessions[id] === state
   const { db, query, exact } = state
   const pageSize = settings.keyPageSize
-  const limit = all ? Infinity : state.keys.length + pageSize
+  const limit = all ? Infinity : (reset ? 0 : state.keys.length) + pageSize
   state.loading = true
   const pattern = exact ? query : (!query ? '*' : /[*?\[\\]/.test(query) ? query : '*' + query + '*')
   try {
-    for (const value of state.pendingKeys.splice(0, limit - state.keys.length)) state.keys.push(value)
-    let first = reset
-    while ((first || state.cursor) && state.keys.length < limit) {
-      first = false
-      const page = await call('Scan', id, db, pattern, state.cursor, exact, pageSize)
-      if (revision !== state.revision || sessions[id] !== state) return
-      state.cursor = page.cursor
-      for (const value of page.keys) {
-        const key = identity(value)
-        if (state.seen.has(key)) continue
-        state.seen.add(key)
-        if (state.keys.length < limit) state.keys.push(value)
-        else state.pendingKeys.push(value)
-      }
-    }
+    await scanKeyBatches(state, limit, reset, cursor => call('Scan', id, db, pattern, cursor, exact, pageSize), isCurrent)
   } catch (error) {
-    if (revision === state.revision) notify(error, true)
+    if (isCurrent()) notify(error, true)
   } finally {
-    if (revision === state.revision) {
-      if (state.sorting) state.keys.sort((a, b) => display(a).localeCompare(display(b)))
+    if (isCurrent()) {
+      if (state.sorting) {
+        state.keys = shallowReactive(state.keys.slice().sort((a, b) => display(a).localeCompare(display(b))))
+        indexKeys(state, separator, state.keys)
+      }
       state.loading = false
     }
   }
@@ -408,7 +400,9 @@ async function nameDatabase() {
 
 /** Switch between the key tree and the flat list. */
 function toggleTree() {
-  session.value.tree = !session.value.tree
+  const state = session.value
+  state.tree = !state.tree
+  indexKeys(state, connection.value.separator, state.keys)
 }
 
 /** Expand or collapse one folder while preserving its exact key identity. */
@@ -729,7 +723,8 @@ onUnmounted(() => {
           <NButton size="small" quaternary type="error" class="icon flat danger" :title="tr('批量删除键', 'Delete selected keys')" :disabled="!session.selected.size || connection.readOnly" @click="deleteKeys"><Trash2 :size="15" /></NButton>
         </div>
         <div class="key-scroll">
-          <KeyTree :nodes="tree" :expanded="session.expanded" :selected="session.selected"
+          <KeyTree :nodes="session.keyIndex?.nodes" :keys="session.keyIndex ? undefined : session.keys"
+            :key-count="session.keys.length" :expanded="session.expanded" :selected="session.selected"
             :active="active.kind === 'key' && active.connection === selectedId && active.db === session.db ? identity(active.key) : ''"
             :multi="session.multi" @open="openKey" @toggle="toggleFolder" @check="checkKey" />
           <div v-if="!session.keys.length && !session.loading" class="empty-side">{{ tr('没有匹配的键', 'No matching keys') }}</div>

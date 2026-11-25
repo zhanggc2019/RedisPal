@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { ChevronDown, ChevronRight, Folder, KeyRound } from '@lucide/vue'
 import { display, identity } from './model.js'
 
-const props = defineProps({ nodes: Array, expanded: Object, selected: Object, active: String, multi: Boolean })
+const props = defineProps({ nodes: Array, keys: Array, keyCount: Number, expanded: Object, selected: Object, active: String, multi: Boolean })
 const emit = defineEmits(['open', 'toggle', 'check'])
 const viewport = ref(null)
 const scroll = ref(0)
@@ -21,12 +21,19 @@ const rows = computed(() => {
       if (node.children.length && props.expanded.has(node.id)) visit(node.children, depth + 1)
     }
   }
-  visit(props.nodes, 0)
+  // The count invalidates traversal when the raw index grows in place.
+  if (props.nodes && props.keyCount) visit(props.nodes, 0)
   return visible
 })
-const start = computed(() => rows.value.length < 800 ? 0 : Math.max(0, Math.min(Math.floor(scroll.value / rowHeight), rows.value.length - 1) - overscan))
-const end = computed(() => rows.value.length < 800 ? rows.value.length : Math.min(rows.value.length, start.value + Math.ceil(height.value / rowHeight) + overscan * 2))
-const visible = computed(() => rows.value.slice(start.value, end.value))
+const rowCount = computed(() => props.keys ? props.keyCount : rows.value.length)
+const start = computed(() => rowCount.value < 800 ? 0 : Math.max(0, Math.min(Math.floor(scroll.value / rowHeight), rowCount.value - 1) - overscan))
+const end = computed(() => rowCount.value < 800 ? rowCount.value : Math.min(rowCount.value, start.value + Math.ceil(height.value / rowHeight) + overscan * 2))
+const visible = computed(() => {
+  if (!props.keys) return rows.value.slice(start.value, end.value)
+  return props.keys.slice(start.value, end.value).map(value => ({
+    node: { id: identity(value), title: display(value), value, children: [] }, depth: 0,
+  }))
+})
 
 /** Open the exact key or expand a directory that has no value of its own. */
 function activate(node) {
@@ -38,7 +45,7 @@ function activate(node) {
 async function navigate(event, node, index) {
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault()
-    const target = Math.max(0, Math.min(rows.value.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)))
+    const target = Math.max(0, Math.min(rowCount.value - 1, index + (event.key === 'ArrowDown' ? 1 : -1)))
     const top = target * rowHeight
     const pane = viewport.value
     if (top < pane.scrollTop) pane.scrollTop = top
@@ -79,6 +86,6 @@ onUnmounted(() => observer?.disconnect())
         <span>{{ node.title || '␀' }}</span>
       </NButton>
     </div>
-    <div v-if="end < rows.length" :style="{ height: (rows.length - end) * rowHeight + 'px' }"></div>
+    <div v-if="end < rowCount" :style="{ height: (rowCount - end) * rowHeight + 'px' }"></div>
   </div>
 </template>

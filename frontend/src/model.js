@@ -95,34 +95,72 @@ export function splitCommand(line) {
   return parts
 }
 
-// keyTree groups text keys by separator and keeps keys that also name folders selectable.
-export function keyTree(keys, separator) {
-  const root = new Map()
-  for (const value of keys) {
-    if (typeof value !== 'string' || !separator) {
-      root.set(identity(value), { id: identity(value), title: display(value), value, children: [] })
-      continue
+export function createKeyTreeIndex(separator) {
+  const nodes = []
+  const byId = new Map()
+
+  function add(id, title, siblings) {
+    let node = byId.get(id)
+    if (!node) {
+      node = { id, title, value: undefined, children: [] }
+      byId.set(id, node)
+      siblings.push(node)
     }
-    const segments = value.split(separator)
-    let nodes = root
-    let path = 't:'
-    for (let i = 0; i < segments.length; i++) {
-      const title = segments[i]
-      path += (i === 0 ? '' : separator) + title
-      if (!nodes.has(path)) nodes.set(path, { id: path, title, children: [], nodes: new Map() })
-      const node = nodes.get(path)
-      if (i === segments.length - 1) node.value = value
-      nodes = node.nodes
+    return node
+  }
+
+  function append(keys) {
+    for (const value of keys) {
+      if (typeof value !== 'string' || !separator) {
+        add(identity(value), display(value), nodes).value = value
+        continue
+      }
+      const segments = value.split(separator)
+      let siblings = nodes
+      let path = 't:'
+      let node
+      for (let i = 0; i < segments.length; i++) {
+        path += (i === 0 ? '' : separator) + segments[i]
+        node = add(path, segments[i], siblings)
+        siblings = node.children
+      }
+      node.value = value
     }
   }
-  /** Convert ordered folder maps to the arrays consumed by the sidebar. */
-  function flatten(nodes) {
-    return Array.from(nodes.values(), ({ nodes: children, ...node }) => ({
-      ...node,
-      children: children ? flatten(children) : node.children,
-    }))
+
+  return { nodes, append }
+}
+
+export async function scanKeyBatches(state, limit, reset, request, isCurrent) {
+  function append(keys) {
+    state.keyIndex?.append(keys)
+    state.keys.push(...keys)
   }
-  return flatten(root)
+
+  if (reset) {
+    state.keys.length = 0
+    state.pendingKeys.length = 0
+    state.cursor = ''
+    state.seen.clear()
+  }
+  append(state.pendingKeys.splice(0, limit - state.keys.length))
+  let first = reset
+  while ((first || state.cursor) && state.keys.length < limit) {
+    first = false
+    const page = await request(state.cursor)
+    if (!isCurrent()) return
+    state.cursor = page.cursor
+    const room = limit - state.keys.length
+    const next = []
+    for (const value of page.keys) {
+      const id = identity(value)
+      if (state.seen.has(id)) continue
+      state.seen.add(id)
+      if (next.length < room) next.push(value)
+      else state.pendingKeys.push(value)
+    }
+    append(next)
+  }
 }
 
 // endpoint accepts legacy split hosts, including unbracketed IPv6.
