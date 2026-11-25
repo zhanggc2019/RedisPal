@@ -302,12 +302,20 @@ fieldset { padding: 9px 10px 11px; border: 1px solid var(--border); border-radiu
 legend { color: var(--muted); margin-left: 2px; padding: 0 4px; }
 .preset-picker { grid-column: 1 / -1; padding: 0; border: 0; min-width: 0; }
 .preset-picker legend { padding: 0; margin: 0 0 7px; font-size: 13px; }
-.app .preset-options { display: flex; }
-.app .preset-options .n-radio-button { flex: 1; justify-content: center; }
+.app .preset-options { display: flex; flex-wrap: wrap; gap: 6px; height: auto; }
+.app .preset-options .n-radio-group__splitor { display: none; }
+.app .preset-options .n-radio-button {
+  display: flex; flex: 1; align-items: center; justify-content: center;
+  padding-inline: 10px; border: 1px solid var(--border); border-radius: var(--n-button-border-radius);
+}
+.app .preset-options .n-radio-button__state-border { border-radius: inherit; }
+.app .preset-options .n-radio-button:hover { color: var(--accent-text); }
+.app .preset-options .n-radio-button--checked {
+  color: var(--accent-text); background: var(--accent-soft); border-color: var(--accent);
+}
 .preset-option { display: inline-flex; align-items: center; gap: 7px; }
 .preset-option i { width: 12px; height: 12px; border: 1px solid var(--border-strong); border-radius: 50%; flex: none; }
 .settings-dialog { width: min(calc(100vw / var(--ui-scale) - 36px), 640px); }
-.settings-dialog .preset-options { flex-wrap: wrap; }
 .settings-layout { display: grid; grid-template-columns: minmax(92px, 24%) minmax(0, 1fr); min-height: 0; }
 .settings-layout > nav { display: flex; flex-direction: column; align-items: stretch; gap: 3px; padding: 8px; border-right: 1px solid var(--border); }
 .settings-layout > nav button { justify-content: flex-start; }

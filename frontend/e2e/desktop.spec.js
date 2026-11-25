@@ -898,7 +898,7 @@ test('desktop dialog focus exposes Settings through aria-labelledby', async () =
   }
 })
 
-/** Check the Naive UI defaults, the eight custom combinations and saved selections. */
+/** Check the Naive UI defaults, the built-in palettes and saved selections. */
 test('desktop applies and saves its built-in themes with readable primary actions', async ({}, info) => {
   test.skip(process.platform !== 'win32', 'requires the native Windows build')
   const app = await launch()
@@ -910,7 +910,10 @@ test('desktop applies and saves its built-in themes with readable primary action
     const dialog = page.getByRole('dialog')
     const mode = dialog.getByRole('combobox', { name: '主题', exact: true })
     const close = dialog.getByRole('button', { name: '关闭设置', exact: true })
-    const presets = [['松绿', 'pine'], ['湖蓝', 'lake'], ['暮紫', 'dusk'], ['石墨', 'graphite']]
+    const presets = [
+      ['松绿', 'pine'], ['湖蓝', 'lake'], ['暮紫', 'dusk'], ['石墨', 'graphite'],
+      ['Element Plus', 'element-plus'], ['Layui', 'layui'], ['Ant Design', 'antd'],
+    ]
     await expect(root).toHaveAttribute('data-scheme', 'default')
     await expect(root).toHaveAttribute('data-theme', 'light')
     await expect(primary).toHaveCSS('background-color', 'rgb(24, 160, 88)')
@@ -945,11 +948,14 @@ test('desktop applies and saves its built-in themes with readable primary action
       expect(backgrounds.size).toBe(presets.length)
     }
     await page.reload()
-    await expect(root).toHaveAttribute('data-scheme', 'graphite')
+    await expect(root).toHaveAttribute('data-scheme', 'antd')
     await expect(root).toHaveAttribute('data-theme', 'dark')
     await settings.click()
     await expect(mode).toHaveValue('dark')
-    await expect(dialog.getByRole('radio', { name: '石墨' })).toBeChecked()
+    await expect(dialog.getByRole('radio', { name: 'Ant Design', exact: true })).toBeChecked()
+    const lastPreset = await dialog.locator('.n-radio-button').last().boundingBox()
+    const modeLabelTop = await mode.evaluate(element => element.closest('label').getBoundingClientRect().top)
+    expect(lastPreset.y + lastPreset.height).toBeLessThanOrEqual(modeLabelTop)
     await page.screenshot({ path: info.outputPath('theme-settings.png') })
     await mode.selectOption('system')
     await close.click()

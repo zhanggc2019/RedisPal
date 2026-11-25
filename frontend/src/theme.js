@@ -25,6 +25,9 @@ export const themePresets = [
   { id: 'lake', zh: '湖蓝', en: 'Lake', light: '#205d96', dark: '#86c2f3' },
   { id: 'dusk', zh: '暮紫', en: 'Dusk', light: '#67459b', dark: '#c3a7f2' },
   { id: 'graphite', zh: '石墨', en: 'Graphite', light: '#495463', dark: '#b5c2d3' },
+  { id: 'element-plus', zh: 'Element Plus', en: 'Element Plus', light: '#409eff', dark: '#79bbff', lightButtonText: '#000000' },
+  { id: 'layui', zh: 'Layui', en: 'Layui', light: '#16baaa', dark: '#62d6ca', lightButtonText: '#000000' },
+  { id: 'antd', zh: 'Ant Design', en: 'Ant Design', light: '#1677ff', dark: '#69b1ff', lightButtonText: '#000000' },
 ]
 
 /** Restore a supported preference or use the Naive UI palette. */
@@ -51,9 +54,11 @@ export function appearance(value, mode, font) {
   const accent = preset[modeName]
   const native = preset.id === 'default' ? nativeColors[modeName] : null
   const active = mix(colors.panel, accent, dark ? .19 : .10)
-  const foreground = mix(accent, dark ? '#ffffff' : '#0b1420', dark ? .27 : .12)
-  const accentHover = native?.primaryColorHover ?? mix(accent, dark ? '#ffffff' : '#07111c', .12)
-  const accentPressed = native?.primaryColorPressed ?? mix(accent, dark ? '#ffffff' : '#07111c', .2)
+  // Bright brand colors need darker text on pale surfaces and lighter fills behind dark button labels.
+  const foreground = dark ? mix(accent, '#ffffff', .27) : mix(accent, '#0b1420', preset.lightButtonText ? .4 : .12)
+  const accentTint = dark || preset.lightButtonText ? '#ffffff' : '#07111c'
+  const accentHover = native?.primaryColorHover ?? mix(accent, accentTint, .12)
+  const accentPressed = native?.primaryColorPressed ?? mix(accent, accentTint, .2)
   const stateColors = base => {
     const hover = mix(base, dark ? '#ffffff' : '#07111c', .12)
     return { base, hover, pressed: mix(base, dark ? '#ffffff' : '#07111c', .2), suppl: hover }
@@ -62,7 +67,7 @@ export function appearance(value, mode, font) {
   const success = stateColors(colors.success)
   const warning = stateColors(colors.warn)
   const danger = stateColors(colors.danger)
-  const onAccent = dark ? '#101a25' : '#ffffff'
+  const onAccent = dark ? '#101a25' : (preset.lightButtonText ?? '#ffffff')
   const fontFamily = font || '"Segoe UI", "Microsoft YaHei UI", sans-serif'
 
   return {

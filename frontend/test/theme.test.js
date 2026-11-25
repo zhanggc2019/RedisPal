@@ -3,12 +3,26 @@ import test from 'node:test'
 import { darkTheme, lightTheme } from 'naive-ui'
 import { appearance, normalizePreset, themePresets } from '../src/theme.js'
 
+const frameworkColors = {
+  'element-plus': '#409eff',
+  layui: '#16baaa',
+  antd: '#1677ff',
+}
+
 test('defaults to Naive UI and preserves other saved schemes', () => {
   assert.equal(themePresets[0].en, 'Naive UI')
   assert.equal(normalizePreset(undefined), 'default')
-  assert.deepEqual(themePresets.map(preset => preset.id), ['default', 'pine', 'lake', 'dusk', 'graphite'])
+  assert.deepEqual(themePresets.map(preset => preset.id), ['default', 'pine', 'lake', 'dusk', 'graphite', ...Object.keys(frameworkColors)])
   assert.equal(normalizePreset('not-a-theme'), 'default')
   assert.equal(normalizePreset('lake'), 'lake')
+})
+
+// A saved framework scheme keeps its official primary color after restoration.
+test('restores framework schemes and applies their official primary colors', () => {
+  for (const [preset, color] of Object.entries(frameworkColors)) {
+    assert.equal(normalizePreset(preset), preset)
+    assert.equal(appearance(preset, 'light').css['--accent'], color)
+  }
 })
 
 // Every palette must receive the same compact Naive UI mapping as the default.
@@ -125,8 +139,9 @@ test('keeps the complete compact Naive UI contract for every palette and font', 
       assert.equal(naive.Tag.colorWarning, css['--hover'])
       assert.equal(naive.Tag.textColorError, css['--danger'])
       assert.equal(naive.Tag.colorError, css['--danger-surface'])
+      const lightButtonText = Object.hasOwn(frameworkColors, preset.id) ? '#000000' : '#ffffff'
       for (const state of ['Primary', 'HoverPrimary', 'PressedPrimary', 'FocusPrimary']) {
-        assert.equal(naive.Button[`textColor${state}`], mode === 'light' ? '#ffffff' : '#101a25')
+        assert.equal(naive.Button[`textColor${state}`], mode === 'light' ? lightButtonText : '#101a25')
       }
     }
   }
