@@ -92,7 +92,7 @@ async function connect(page, name, readOnly = false, endpoint = addr, secret = p
   await expect(result).toBeInViewport()
   await dialog.getByRole('button', { name: 'Save connection' }).click()
   await page.getByRole('button', { name, exact: true }).click()
-  await expect(page.locator('.toast').getByText('Connection successful · ' + name, { exact: true })).toBeVisible()
+  await expect(page.locator('.sidebar-footer').getByRole('status')).toContainText('Connected')
   await expect(page.getByLabel('Database', { exact: true })).toBeVisible()
 }
 
@@ -176,7 +176,7 @@ test('desktop workbench, settings and connection form fit supported widths and s
     await english(page)
     const cdp = await page.context().newCDPSession(page)
     for (const [width, scale, theme] of [[1440, 1, 'light'], [1024, 1.25, 'dark'], [860, 1.5, 'system']]) {
-      await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: 720, deviceScaleFactor: scale, mobile: false })
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: width === 860 ? 520 : 720, deviceScaleFactor: scale, mobile: false })
       await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' })
       const settings = page.getByRole('button', { name: 'Settings', exact: true })
       await settings.click()
@@ -184,10 +184,16 @@ test('desktop workbench, settings and connection form fit supported widths and s
       await page.getByRole('combobox', { name: 'Interface zoom', exact: true }).selectOption(String(scale * 100))
       const dialog = page.getByRole('dialog', { name: 'Settings', exact: true })
       await expect(dialog).toBeInViewport({ ratio: 1 })
-      await expect(dialog.getByRole('button', { name: 'Done', exact: true })).toBeInViewport({ ratio: 1 })
+      const close = dialog.getByRole('button', { name: 'Close', exact: true })
+      await expect(close).toBeInViewport({ ratio: 1 })
       await expect(dialog.getByRole('button', { name: 'Appearance', exact: true })).toHaveAttribute('aria-current', 'true')
+      await expect(dialog.getByRole('combobox', { name: 'Theme', exact: true })).toBeInViewport({ ratio: 1 })
       await page.screenshot({ path: info.outputPath(`${width}-${scale}-settings.png`) })
-      await dialog.getByRole('button', { name: 'Done', exact: true }).click()
+      const appearanceBounds = await dialog.boundingBox()
+      await dialog.getByRole('button', { name: 'General', exact: true }).click()
+      await expect(dialog.getByRole('heading', { name: 'General', exact: true })).toBeVisible()
+      expect(await dialog.boundingBox()).toEqual(appearanceBounds)
+      await close.click()
       await expect(settings).toBeFocused()
       const home = page.getByRole('tabpanel', { name: 'Workspace', exact: true })
       await expect(home.getByRole('button', { name: 'New connection', exact: true })).toBeInViewport()
@@ -231,6 +237,42 @@ test('desktop keeps a failed connection visible and retries on demand', async ()
     await expect(retry).toBeVisible({ timeout: 22_000 })
     await expect(failure).toBeVisible()
   } finally {
+    await app.release()
+  }
+})
+
+/** Keep Redis keys and connection status usable at the minimum viewport. */
+test('desktop keeps the key browser usable at 150 percent zoom', async ({}, info) => {
+  test.skip(!addr || process.platform !== 'win32', 'set REDIS_TEST_ADDR on Windows for the native test')
+  const app = await launch()
+  const { page } = app
+  const key = 'redispal-compact-' + Date.now()
+  try {
+    await english(page)
+    await connect(page, 'Compact workspace')
+    await page.getByTitle('Open CLI', { exact: true }).click()
+    await cli(page, 'SET ' + key + ' sample')
+    const search = page.getByLabel('Search keys', { exact: true })
+    await search.fill(key)
+    await search.press('Enter')
+    const keyButton = page.getByRole('button', { name: key, exact: true })
+    await expect(keyButton).toBeVisible()
+
+    await page.setViewportSize({ width: 860, height: 520 })
+    await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    await page.getByRole('combobox', { name: 'Interface zoom', exact: true }).selectOption('150')
+    await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click()
+    await expect(keyButton).toBeInViewport({ ratio: 1 })
+    await expect(page.locator('.sidebar-footer').getByRole('status')).toBeInViewport({ ratio: 1 })
+    await expect.poll(() => page.locator('.key-scroll').evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(60)
+    await page.getByRole('button', { name: 'Database actions', exact: true }).click()
+    await expect(page.getByRole('menuitem', { name: 'Open CLI', exact: true })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await keyButton.click()
+    await expect(page.getByRole('heading', { name: key, exact: true })).toBeVisible()
+    await page.screenshot({ path: info.outputPath('compact-key-browser.png') })
+  } finally {
+    await cleanup(addr, password, key)
     await app.release()
   }
 })
@@ -805,23 +847,26 @@ test('desktop creates and queries a Redis Search index', async ({}, info) => {
   }
 })
 
-/** Exercise startup polling and the manual update action against a local GitHub response fixture. */
-test('desktop finds a new release automatically and offers its download page', async () => {
+/** Exercise startup polling and keep manual results beside the version in Settings. */
+test('desktop finds a new release automatically and offers its download page', async ({}, info) => {
   test.skip(process.platform !== 'win32', 'requires the native Windows build')
   const version = process.env.ARDM_TEST_APP_VERSION || '0.0.1'
   const latest = 'v' + version.replace(/\d+$/, patch => String(Number(patch) + 1))
   let checks = 0
+  let tag = latest
+  let responseCode = 200
   const server = createHTTPServer((_request, response) => {
     checks++
+    response.statusCode = responseCode
     response.setHeader('Content-Type', 'application/json')
-    response.end(JSON.stringify({ tag_name: latest }))
+    response.end(JSON.stringify({ tag_name: tag }))
   })
   await new Promise((resolve, reject) => server.listen(0, '127.0.0.1', resolve).once('error', reject))
   let app
   try {
     app = await launch('http://127.0.0.1:' + server.address().port)
     const { page } = app
-    const status = page.getByRole('status')
+    const status = page.locator('.update-banner').getByRole('status')
     await expect(status).toContainText('发现新版本')
     await expect(status).toContainText('v' + version + ' → ' + latest)
     await expect(page.getByRole('button', { name: '查看并下载' })).toBeVisible()
@@ -832,10 +877,25 @@ test('desktop finds a new release automatically and offers its download page', a
     await expect(status).toHaveCount(0)
     await page.getByRole('button', { name: '设置', exact: true }).click()
     await page.getByRole('button', { name: '更新', exact: true }).click()
-    await expect(page.getByRole('dialog')).toContainText('当前版本 v' + version)
-    await page.getByRole('dialog').getByRole('button', { name: '检查更新', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: '设置', exact: true })
+    const check = dialog.getByRole('button', { name: '检查更新', exact: true })
+    await expect(dialog).toContainText('当前版本 v' + version)
+    tag = 'v' + version
+    await check.click()
+    await expect(dialog.getByRole('status')).toContainText('当前已是最新版本')
+    responseCode = 503
+    await check.click()
+    await expect(dialog.getByRole('alert')).toContainText('检查更新失败')
+    responseCode = 200
+    tag = latest
+    await check.click()
+    await expect(dialog.getByRole('status')).toContainText(latest)
+    await expect(dialog.getByRole('button', { name: '查看并下载' })).toBeVisible()
+    await expect(dialog.getByRole('alert')).toHaveCount(0)
+    await expect(status).toHaveCount(0)
+    await page.screenshot({ path: info.outputPath('settings-update.png') })
+    await dialog.getByRole('button', { name: '关闭', exact: true }).click()
     await expect(status).toContainText(latest)
-    await expect(page.getByRole('dialog')).toHaveCount(0)
   } finally {
     if (app) await app.release()
     await new Promise(resolve => server.close(resolve))
@@ -953,9 +1013,9 @@ test('desktop applies and saves its built-in themes with readable primary action
     await settings.click()
     await expect(mode).toHaveValue('dark')
     await expect(dialog.getByRole('radio', { name: 'Ant Design', exact: true })).toBeChecked()
-    const lastPreset = await dialog.locator('.n-radio-button').last().boundingBox()
-    const modeLabelTop = await mode.evaluate(element => element.closest('label').getBoundingClientRect().top)
-    expect(lastPreset.y + lastPreset.height).toBeLessThanOrEqual(modeLabelTop)
+    const themeControl = await mode.boundingBox()
+    const firstPreset = await dialog.getByRole('radio', { name: 'Naive UI', exact: true }).locator('..').boundingBox()
+    expect(themeControl.y + themeControl.height).toBeLessThanOrEqual(firstPreset.y)
     await page.screenshot({ path: info.outputPath('theme-settings.png') })
     await mode.selectOption('system')
     await close.click()
@@ -1008,7 +1068,6 @@ test('desktop app creates, edits, searches, backs up, restores and deletes Redis
     await expect(page.locator('.toast')).toHaveCount(0)
     await connect(page, 'Wails Redis E2E')
     await page.screenshot({ path: info.outputPath('connection-success.png') })
-    await page.getByRole('button', { name: 'Dismiss notification', exact: true }).click()
     await expect(page.locator('.toast')).toHaveCount(0)
     await expect(page.getByRole('heading', { name: 'Wails Redis E2E' })).toBeVisible()
     await expect(page.getByText('redis_version', { exact: true })).toBeVisible()

@@ -14,31 +14,34 @@ const groups = [
 
 <template>
   <aside id="workspace-sidebar" class="sidebar">
-    <slot name="connections" />
-    <section v-if="connected" class="browser">
-      <slot name="database" />
-      <div class="resource-switch" role="group" :aria-label="tr('资源视图', 'Resource view')">
-        <NButton size="small" quaternary class="flat" :aria-pressed="mode === 'keys'" @click="emit('update:mode', 'keys')">{{ tr('键', 'Keys') }}</NButton>
-        <NButton size="small" quaternary class="flat" :aria-pressed="mode === 'tools'" @click="emit('update:mode', 'tools')">{{ tr('工具', 'Tools') }}</NButton>
-      </div>
-      <div v-show="mode === 'keys'" class="sidebar-keys"><slot name="keys" /></div>
-      <nav v-if="mode === 'tools'" class="sidebar-tools" :aria-label="tr('数据库工具', 'Database tools')">
-        <section v-for="[zh, en, tools] in groups" :key="en">
-          <h3>{{ tr(zh, en) }}</h3>
-          <NButton v-for="[id, icon, labelZh, labelEn] in tools" :key="id" size="small" quaternary class="flat" @click="emit('tool', id)">
-            <component :is="icon" :size="14" aria-hidden="true" />{{ tr(labelZh, labelEn) }}
-          </NButton>
-        </section>
-      </nav>
-    </section>
+    <div class="sidebar-content">
+      <div class="sidebar-top"><slot name="header" /></div>
+      <slot name="connections" />
+      <section v-if="connected" class="browser">
+        <slot name="database" />
+        <div class="resource-switch" role="group" :aria-label="tr('资源视图', 'Resource view')">
+          <NButton size="small" quaternary class="flat" :aria-pressed="mode === 'keys'" @click="emit('update:mode', 'keys')">{{ tr('键', 'Keys') }}</NButton>
+          <NButton size="small" quaternary class="flat" :aria-pressed="mode === 'tools'" @click="emit('update:mode', 'tools')">{{ tr('工具', 'Tools') }}</NButton>
+        </div>
+        <div v-show="mode === 'keys'" class="sidebar-keys"><slot name="keys" /></div>
+        <nav v-if="mode === 'tools'" class="sidebar-tools" :aria-label="tr('数据库工具', 'Database tools')">
+          <section v-for="[zh, en, tools] in groups" :key="en">
+            <h3>{{ tr(zh, en) }}</h3>
+            <NButton v-for="[id, icon, labelZh, labelEn] in tools" :key="id" size="small" quaternary class="flat" @click="emit('tool', id)">
+              <component :is="icon" :size="14" aria-hidden="true" />{{ tr(labelZh, labelEn) }}
+            </NButton>
+          </section>
+        </nav>
+      </section>
+    </div>
     <slot name="footer" />
   </aside>
 </template>
 
 <style scoped>
-.resource-switch { display: flex; gap: 4px; padding: 8px 12px 0; }
+.resource-switch { display: flex; flex: none; gap: 4px; padding: 8px 12px 0; }
 .resource-switch > button { flex: 1; }
-.sidebar-keys { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.sidebar-keys { display: flex; flex: 1; flex-direction: column; min-height: min-content; }
 .sidebar-tools { overflow: auto; padding: 8px 12px; }
 .sidebar-tools h3 { margin: 8px 4px 4px; color: var(--muted); font-size: 12px; font-weight: 650; }
 .sidebar-tools button { display: flex; justify-content: flex-start; width: 100%; }

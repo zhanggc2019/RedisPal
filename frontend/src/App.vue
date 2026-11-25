@@ -52,7 +52,11 @@ const sessions = reactive({})
 const connectionErrors = reactive({})
 const sidebarMode = ref('keys')
 const viewportWidth = ref(innerWidth)
-const sidebarMax = computed(() => Math.max(224, Math.floor(viewportWidth.value * .55 / (settings.zoom / 100))))
+/** Preserve room for the workbench when the window or zoom reduces its logical width. */
+const sidebarMax = computed(() => {
+  const logicalWidth = viewportWidth.value / (settings.zoom / 100)
+  return Math.max(224, Math.floor(logicalWidth * (logicalWidth < 720 ? .40 : .55)))
+})
 const tabs = ref([{ id: 'home', kind: 'home' }])
 const activeId = ref('home')
 const focusTabId = ref(null)
@@ -73,8 +77,20 @@ const closePrompt = ref(false)
 const closeBusy = ref(false)
 const releaseConfig = ref({ version: '', github: false })
 const availableUpdate = ref(null)
+const updateFeedback = ref(null)
 const checkingUpdates = ref(false)
 const updating = ref(false)
+/** Describe the same release state in Settings and the workbench banner. */
+const updateTitle = computed(() => {
+  if (availableUpdate.value?.ready) return tr('更新已就绪，重启后生效', 'Update ready. Restart to apply.')
+  if (updating.value && releaseConfig.value.signed) return tr('正在下载并验证更新…', 'Downloading and verifying update…')
+  return tr('发现新版本', 'Update available')
+})
+/** Label the action that the current build can take for the release. */
+const updateAction = computed(() => {
+  if (availableUpdate.value?.ready) return tr('立即重启', 'Restart now')
+  return releaseConfig.value.signed ? tr('安装更新', 'Install update') : tr('查看并下载', 'View and download')
+})
 const deferredRestart = ref(false)
 const shortcutsOpen = ref(false)
 const context = ref(null)
@@ -97,12 +113,10 @@ function tr(zh, en) {
 }
 
 /** Show the result of a server or workspace operation. */
-function notify(text, status = false) {
+function notify(text, error = false) {
   clearTimeout(messageTimer)
-  const error = status === true
-  const success = status === 'success'
-  message.value = { text: text?.message || String(text), error, success }
-  messageTimer = setTimeout(() => { message.value = null }, error ? 8000 : success ? 5200 : 4200)
+  message.value = { text: text?.message || String(text), error }
+  messageTimer = setTimeout(() => { message.value = null }, error ? 8000 : 4200)
 }
 
 /** Read the build version and check its update feed in the background. */
@@ -113,24 +127,23 @@ async function startUpdateChecks() {
   updateTimer = setInterval(checkForUpdate, 6 * 60 * 60 * 1000)
 }
 
-/** Check for a newer stable release, surfacing errors only for manual checks. */
+/** Check for a stable release and keep manual feedback with the update controls. */
 async function checkForUpdate(manual = false) {
   if (checkingUpdates.value || updating.value) return
+  if (manual) updateFeedback.value = null
   checkingUpdates.value = true
   try {
     const release = await updateCall('Check')
     if (!release.version) {
       availableUpdate.value = null
-      if (manual) notify(tr('当前已是最新版本', 'You are up to date'))
+      if (manual) updateFeedback.value = { text: tr('当前已是最新版本', 'You are up to date') }
     } else if (manual || release.ready || release.version !== localStorage.getItem('ardm-dismissed-update')) {
       availableUpdate.value = release
-      if (manual) {
-        deferredRestart.value = false
-        settingsOpen.value = false
-      }
+      updateFeedback.value = null
+      if (manual) deferredRestart.value = false
     }
   } catch (error) {
-    if (manual) notify(tr('检查更新失败', 'Could not check for updates') + ' · ' + (error.message || String(error)), true)
+    if (manual) updateFeedback.value = { text: tr('检查更新失败', 'Could not check for updates') + ' · ' + (error.message || String(error)), error: true }
   } finally {
     checkingUpdates.value = false
   }
@@ -142,12 +155,15 @@ function dismissUpdate() {
   availableUpdate.value = null
 }
 
+/** Apply the current update action while leaving its result beside the release. */
 async function openUpdate() {
   const release = availableUpdate.value
   if (!release || checkingUpdates.value || updating.value) return
+  updateFeedback.value = null
   updating.value = true
   try {
     if (release.ready) {
+      if (tabs.value.some(tab => tab.dirty)) settingsOpen.value = false
       if (await confirmDiscard(tabs.value)) await updateCall('RestartUpdate')
     } else if (releaseConfig.value.signed) {
       await updateCall('PrepareUpdate', release.version)
@@ -156,7 +172,7 @@ async function openUpdate() {
       await Browser.OpenURL(release.url)
     }
   } catch (error) {
-    notify(tr('更新失败', 'Update failed') + ' · ' + (error.message || String(error)), true)
+    updateFeedback.value = { text: tr('更新失败', 'Update failed') + ' · ' + (error.message || String(error)), error: true }
   } finally {
     updating.value = false
   }
@@ -261,7 +277,6 @@ async function connect(item) {
     }
     if (!item.temporary) settings.recentConnections = [item.id, ...recentConnections.value.map(entry => entry.id).filter(id => id !== item.id)].slice(0, 5)
     if (selectedId.value === item.id) openTab({ kind: 'server', connection: item.id })
-    notify(tr('连接成功', 'Connection successful') + ' · ' + item.name, 'success')
     void scan(item.id, true)
   } catch (error) {
     await call('Disconnect', item.id).catch(() => {})
@@ -770,14 +785,17 @@ onUnmounted(() => {
     :style="{ ...activeTheme.css, '--sidebar-width': clampSidebar(settings.sidebar) + 'px', '--ui-scale': settings.zoom / 100, '--workspace-font': settings.font || undefined }"
     @click="context = null">
     <WorkspaceSidebar v-model:mode="sidebarMode" :connected="Boolean(session && !session.connecting)" @tool="kind => openTool(kind, kind === 'cli')">
-      <template #connections>
+      <template #header>
       <header class="brand"><img src="/logo.png" alt=""><div><strong>RedisPal</strong></div>
         <NButton size="small" quaternary class="flat icon" :title="tr('设置', 'Settings')" :aria-label="tr('设置', 'Settings')" @click="settingsOpen = true"><Settings :size="17" /></NButton>
       </header>
       <div class="connection-actions">
-        <NButton size="medium" type="primary" class="primary add-connection" @click="editConnection()"><Plus :size="17" />{{ tr('新建连接', 'New connection') }}</NButton>
+        <NButton size="medium" type="primary" class="primary add-connection" :aria-label="tr('新建连接', 'New connection')"
+          :title="tr('新建连接', 'New connection')" @click="editConnection()"><Plus :size="17" /><span class="add-connection-label">{{ tr('新建连接', 'New connection') }}</span></NButton>
         <NButton size="small" class="icon" :title="tr('连接管理', 'Manage connections')" :aria-label="tr('连接管理', 'Manage connections')" aria-haspopup="menu" :aria-expanded="context?.kind === 'workspace'" @click.stop="menu($event, 'workspace')"><Ellipsis :size="18" /></NButton>
       </div>
+      </template>
+      <template #connections>
       <section class="connections">
         <div class="section-title"><h2>{{ tr('连接', 'Connections') }}</h2>
           <NButton size="small" quaternary class="flat icon" :title="tr('搜索连接', 'Search connections')" @click="searchingConnections = !searchingConnections; connectionFilter = ''"><Search :size="15" /></NButton>
@@ -803,7 +821,8 @@ onUnmounted(() => {
               <NButton size="small" quaternary class="flat connection-name" :title="item.addr" @click="connect(item)"
                 :aria-description="sessions[item.id]?.connecting ? tr('正在连接', 'Connecting') : sessions[item.id] ? tr('已连接', 'Connected') : connectionErrors[item.id] ? tr('连接失败', 'Connection failed') : tr('未连接', 'Disconnected')">
                 <Server :size="16" :style="{ color: item.color || undefined }" aria-hidden="true" /><span>{{ item.name }}</span>
-                <span v-if="sessions[item.id]" class="dot" :class="{ pending: sessions[item.id].connecting }" aria-hidden="true"></span>
+                <span v-if="sessions[item.id]?.connecting" class="dot pending" aria-hidden="true"></span>
+                <CircleCheck v-else-if="sessions[item.id]" class="connection-check" :size="14" aria-hidden="true" />
               </NButton>
               <NButton size="small" quaternary class="flat icon row-menu" :aria-label="tr('连接操作', 'Connection actions')" aria-haspopup="menu" :aria-expanded="context?.kind === 'connection' && context.value.id === item.id" @click.stop="menu($event, 'connection', item)"><Ellipsis :size="16" /></NButton>
             </div>
@@ -822,8 +841,8 @@ onUnmounted(() => {
           <div class="db-select"><Database :size="16" /><select :value="session.db" :aria-label="tr('数据库', 'Database')" @change="selectDatabase(Number($event.target.value))">
             <option v-for="db in session.info.databases" :key="db" :value="db">DB {{ db }}{{ connection.dbNames?.[db] ? ' · ' + connection.dbNames[db] : '' }}</option>
           </select></div>
-          <NButton size="small" class="icon" :title="tr('服务器状态', 'Server status')" @click="openTab({ kind: 'server', connection: selectedId })"><Activity :size="16" /></NButton>
-          <NButton size="small" class="icon" :title="tr('打开命令行', 'Open CLI')" @click="openTool('cli', true)"><Terminal :size="17" /></NButton>
+          <NButton size="small" class="icon db-shortcut" :title="tr('服务器状态', 'Server status')" @click="openTool('server')"><Activity :size="16" /></NButton>
+          <NButton size="small" class="icon db-shortcut" :title="tr('打开命令行', 'Open CLI')" @click="openTool('cli', true)"><Terminal :size="17" /></NButton>
           <NButton size="small" class="icon" :aria-label="tr('数据库操作', 'Database actions')" aria-haspopup="menu" :aria-expanded="context?.kind === 'database'" @click.stop="menu($event, 'database')"><Ellipsis :size="17" /></NButton>
         </div>
       </template>
@@ -872,10 +891,12 @@ onUnmounted(() => {
       </template>
       <template #footer>
       <footer class="sidebar-footer">
-        <span v-if="session && !session.connecting"><i class="dot" aria-hidden="true"></i>{{ tr('已连接', 'Connected') }} · {{ session.latency }} ms</span>
-        <span v-else-if="session?.connecting">{{ tr('正在连接…', 'Connecting…') }}</span>
-        <span v-else-if="connectionErrors[selectedId]">{{ tr('连接失败', 'Connection failed') }}</span>
-        <span v-else>{{ tr('未连接', 'Disconnected') }}</span>
+        <span role="status" aria-atomic="true">
+          <template v-if="session && !session.connecting"><i class="dot" aria-hidden="true"></i>{{ tr('已连接', 'Connected') }} · {{ session.latency }} ms</template>
+          <template v-else-if="session?.connecting">{{ tr('正在连接…', 'Connecting…') }}</template>
+          <template v-else-if="connectionErrors[selectedId]">{{ tr('连接失败', 'Connection failed') }}</template>
+          <template v-else>{{ tr('未连接', 'Disconnected') }}</template>
+        </span>
         <NButton size="small" quaternary class="flat icon" :title="tr('快捷键', 'Keyboard shortcuts')" @click="shortcutsOpen = true"><CircleHelp :size="17" /></NButton>
       </footer>
       </template>
@@ -887,16 +908,17 @@ onUnmounted(() => {
       <WorkspaceTabs :tabs="tabs" :active-id="activeId" :focus-tab-id="focusTabId" :names="tabNames"
         @activate="activateTab" @close="closeTab" @menu="(event, tab) => menu(event, 'tab', tab)"
         @focus-request-complete="clearTabFocus" />
-      <div v-if="availableUpdate && !deferredRestart" class="update-banner">
+      <div v-if="availableUpdate && !deferredRestart && !settingsOpen" class="update-banner">
         <Download :size="17" aria-hidden="true" />
-        <div class="update-message" role="status">
-          <strong v-if="availableUpdate.ready">{{ tr('更新已就绪，重启后生效', 'Update ready. Restart to apply.') }}</strong>
-          <strong v-else-if="updating && releaseConfig.signed">{{ tr('正在下载并验证更新…', 'Downloading and verifying update…') }}</strong>
-          <strong v-else>{{ tr('发现新版本', 'Update available') }}</strong>
-          <span>{{ releaseConfig.version }} → {{ availableUpdate.version }}</span>
+        <div class="update-message">
+          <div role="status">
+            <strong>{{ updateTitle }}</strong>
+            <span>{{ releaseConfig.version }} → {{ availableUpdate.version }}</span>
+          </div>
+          <p v-if="updateFeedback?.error" class="update-error" role="alert">{{ updateFeedback.text }}</p>
         </div>
         <NButton size="small" type="primary" class="primary" :disabled="checkingUpdates || updating" :loading="updating" @click="openUpdate">
-          {{ availableUpdate.ready ? tr('立即重启', 'Restart now') : releaseConfig.signed ? tr('安装更新', 'Install update') : tr('查看并下载', 'View and download') }}
+          {{ updateAction }}
         </NButton>
         <NButton v-if="availableUpdate.ready" size="small" quaternary :disabled="updating" @click="deferredRestart = true">{{ tr('稍后', 'Later') }}</NButton>
         <NButton v-else size="small" quaternary class="flat icon" :disabled="updating" :aria-label="tr('关闭更新提示', 'Dismiss update')" @click="dismissUpdate"><X :size="16" /></NButton>
@@ -930,7 +952,9 @@ onUnmounted(() => {
           </section>
           <div v-if="releaseConfig.version" class="home-version">
             <span>{{ releaseConfig.version }}</span>
-            <NButton v-if="releaseConfig.github || releaseConfig.signed" size="small" quaternary :disabled="checkingUpdates || updating" @click="checkForUpdate(true)">{{ tr('检查更新', 'Check for updates') }}</NButton>
+            <NButton v-if="releaseConfig.github || releaseConfig.signed" size="small" quaternary :disabled="checkingUpdates || updating" :loading="checkingUpdates" @click="checkForUpdate(true)">{{ tr('检查更新', 'Check for updates') }}</NButton>
+            <p v-if="updateFeedback && (!availableUpdate || deferredRestart) && !settingsOpen" class="home-update-feedback"
+              :class="{ 'update-error': updateFeedback.error }" :role="updateFeedback.error ? 'alert' : 'status'">{{ updateFeedback.text }}</p>
           </div>
         </div>
       </section>
@@ -973,6 +997,8 @@ onUnmounted(() => {
         <NButton size="small" role="menuitem" tabindex="-1" quaternary type="error" class="flat danger" @click="removeGroup(context.value)">{{ tr('删除分组', 'Delete group') }}</NButton>
       </template>
       <template v-else-if="context.kind === 'database'">
+        <NButton size="small" role="menuitem" tabindex="-1" quaternary class="flat" @click="openTool('server')"><Activity :size="15" />{{ tr('服务器状态', 'Server status') }}</NButton>
+        <NButton size="small" role="menuitem" tabindex="-1" quaternary class="flat" @click="openTool('cli', true)"><Terminal :size="15" />{{ tr('打开命令行', 'Open CLI') }}</NButton>
         <NButton size="small" role="menuitem" tabindex="-1" quaternary class="flat" @click="context = null; nameDatabase()">{{ tr('命名数据库', 'Name database') }}</NButton>
         <NButton size="small" role="menuitem" tabindex="-1" quaternary class="flat" @click="context = null; session.sorting = !session.sorting; scan(selectedId, true)">{{ session.sorting ? tr('按扫描顺序', 'Order by scan') : tr('按名称排序', 'Sort by name') }}</NButton>
         <NButton size="small" role="menuitem" tabindex="-1" quaternary class="flat" @click="context = null; exportKeys()">{{ tr('导出键', 'Export keys') }}</NButton>
@@ -988,7 +1014,9 @@ onUnmounted(() => {
 
     <ConnectionDialog v-if="connectionDialog" :initial="connectionDialog.initial" :editing="connectionDialog.editing" :groups="groups" @save="saveConnection" @close="connectionDialog = null" />
     <SettingsDialog v-if="settingsOpen" :settings="settings" :palette="palette" :key-page-sizes="keyPageSizes"
-      :release="releaseConfig" :checking="checkingUpdates || updating" @check="checkForUpdate(true)" @close="settingsOpen = false" />
+      :release="releaseConfig" :available-update="availableUpdate" :update-feedback="updateFeedback"
+      :update-title="updateTitle" :update-action="updateAction" :checking="checkingUpdates" :updating="updating"
+      @check="checkForUpdate(true)" @apply-update="openUpdate" @close="settingsOpen = false" />
     <ShortcutsDialog v-if="shortcutsOpen" @close="shortcutsOpen = false" />
     <WorkspaceDialog v-if="question" :title-id="'question-title-' + question.id" :description-id="question.text ? 'question-description-' + question.id : undefined" @close="answer(false)">
       <template #default="{ requestClose, titleId, descriptionId }">
@@ -1013,8 +1041,7 @@ onUnmounted(() => {
         </section>
       </template>
     </WorkspaceDialog>
-    <div v-if="message" class="toast" :class="{ error: message.error, success: message.success }" role="status">
-      <CircleCheck v-if="message.success" :size="21" aria-hidden="true" />
+    <div v-if="message" class="toast" :class="{ error: message.error }" role="status">
       <span>{{ message.text }}</span>
       <NButton size="small" quaternary class="flat icon" :aria-label="tr('关闭提示', 'Dismiss notification')" @click="message = null"><X :size="16" /></NButton>
     </div>
