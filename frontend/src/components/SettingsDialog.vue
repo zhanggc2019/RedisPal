@@ -51,7 +51,7 @@ const sections = computed(() => [
           </div>
           <div v-else class="modal-body update-settings">
             <span>{{ tr('当前版本', 'Current version') }} <strong>{{ release.version }}</strong></span>
-            <NButton v-if="release.github" size="small" :disabled="checking" @click="emit('check')">
+            <NButton v-if="release.github || release.signed" size="small" :disabled="checking" @click="emit('check')">
               {{ checking ? tr('正在检查…', 'Checking…') : tr('检查更新', 'Check for updates') }}
             </NButton>
             <div v-if="release.repositoryUrl" class="repository-row">

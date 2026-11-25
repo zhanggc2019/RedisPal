@@ -74,6 +74,8 @@ const closeBusy = ref(false)
 const releaseConfig = ref({ version: '', github: false })
 const availableUpdate = ref(null)
 const checkingUpdates = ref(false)
+const updating = ref(false)
+const deferredRestart = ref(false)
 const shortcutsOpen = ref(false)
 const context = ref(null)
 const question = ref(null)
@@ -103,26 +105,29 @@ function notify(text, status = false) {
   messageTimer = setTimeout(() => { message.value = null }, error ? 8000 : success ? 5200 : 4200)
 }
 
-/** Read the build version and check the GitHub feed in the background. */
+/** Read the build version and check its update feed in the background. */
 async function startUpdateChecks() {
   releaseConfig.value = await updateCall('Configuration')
-  if (!releaseConfig.value.github) return
+  if (!releaseConfig.value.github && !releaseConfig.value.signed) return
   void checkForUpdate()
   updateTimer = setInterval(checkForUpdate, 6 * 60 * 60 * 1000)
 }
 
 /** Check for a newer stable release, surfacing errors only for manual checks. */
 async function checkForUpdate(manual = false) {
-  if (checkingUpdates.value) return
+  if (checkingUpdates.value || updating.value) return
   checkingUpdates.value = true
   try {
     const release = await updateCall('Check')
     if (!release.version) {
       availableUpdate.value = null
       if (manual) notify(tr('当前已是最新版本', 'You are up to date'))
-    } else if (manual || release.version !== localStorage.getItem('ardm-dismissed-update')) {
+    } else if (manual || release.ready || release.version !== localStorage.getItem('ardm-dismissed-update')) {
       availableUpdate.value = release
-      if (manual) settingsOpen.value = false
+      if (manual) {
+        deferredRestart.value = false
+        settingsOpen.value = false
+      }
     }
   } catch (error) {
     if (manual) notify(tr('检查更新失败', 'Could not check for updates') + ' · ' + (error.message || String(error)), true)
@@ -137,12 +142,23 @@ function dismissUpdate() {
   availableUpdate.value = null
 }
 
-/** Open the official release page in the system browser. */
 async function openUpdate() {
+  const release = availableUpdate.value
+  if (!release || checkingUpdates.value || updating.value) return
+  updating.value = true
   try {
-    await Browser.OpenURL(availableUpdate.value.url)
+    if (release.ready) {
+      if (await confirmDiscard(tabs.value)) await updateCall('RestartUpdate')
+    } else if (releaseConfig.value.signed) {
+      await updateCall('PrepareUpdate', release.version)
+      availableUpdate.value = { ...release, ready: true }
+    } else {
+      await Browser.OpenURL(release.url)
+    }
   } catch (error) {
-    notify(error, true)
+    notify(tr('更新失败', 'Update failed') + ' · ' + (error.message || String(error)), true)
+  } finally {
+    updating.value = false
   }
 }
 
@@ -871,14 +887,19 @@ onUnmounted(() => {
       <WorkspaceTabs :tabs="tabs" :active-id="activeId" :focus-tab-id="focusTabId" :names="tabNames"
         @activate="activateTab" @close="closeTab" @menu="(event, tab) => menu(event, 'tab', tab)"
         @focus-request-complete="clearTabFocus" />
-      <div v-if="availableUpdate" class="update-banner">
+      <div v-if="availableUpdate && !deferredRestart" class="update-banner">
         <Download :size="17" aria-hidden="true" />
         <div class="update-message" role="status">
-          <strong>{{ tr('发现新版本', 'Update available') }}</strong>
+          <strong v-if="availableUpdate.ready">{{ tr('更新已就绪，重启后生效', 'Update ready. Restart to apply.') }}</strong>
+          <strong v-else-if="updating && releaseConfig.signed">{{ tr('正在下载并验证更新…', 'Downloading and verifying update…') }}</strong>
+          <strong v-else>{{ tr('发现新版本', 'Update available') }}</strong>
           <span>{{ releaseConfig.version }} → {{ availableUpdate.version }}</span>
         </div>
-        <NButton size="small" type="primary" class="primary" @click="openUpdate">{{ tr('查看并下载', 'View and download') }}</NButton>
-        <NButton size="small" quaternary class="flat icon" :aria-label="tr('关闭更新提示', 'Dismiss update')" @click="dismissUpdate"><X :size="16" /></NButton>
+        <NButton size="small" type="primary" class="primary" :disabled="checkingUpdates || updating" :loading="updating" @click="openUpdate">
+          {{ availableUpdate.ready ? tr('立即重启', 'Restart now') : releaseConfig.signed ? tr('安装更新', 'Install update') : tr('查看并下载', 'View and download') }}
+        </NButton>
+        <NButton v-if="availableUpdate.ready" size="small" quaternary :disabled="updating" @click="deferredRestart = true">{{ tr('稍后', 'Later') }}</NButton>
+        <NButton v-else size="small" quaternary class="flat icon" :disabled="updating" :aria-label="tr('关闭更新提示', 'Dismiss update')" @click="dismissUpdate"><X :size="16" /></NButton>
       </div>
       <section v-show="active.kind === 'home'" id="workspace-panel-0" class="home" role="tabpanel" aria-labelledby="workspace-tab-0">
         <div class="home-content">
@@ -909,7 +930,7 @@ onUnmounted(() => {
           </section>
           <div v-if="releaseConfig.version" class="home-version">
             <span>{{ releaseConfig.version }}</span>
-            <NButton v-if="releaseConfig.github" size="small" quaternary :disabled="checkingUpdates" @click="checkForUpdate(true)">{{ tr('检查更新', 'Check for updates') }}</NButton>
+            <NButton v-if="releaseConfig.github || releaseConfig.signed" size="small" quaternary :disabled="checkingUpdates || updating" @click="checkForUpdate(true)">{{ tr('检查更新', 'Check for updates') }}</NButton>
           </div>
         </div>
       </section>
@@ -967,7 +988,7 @@ onUnmounted(() => {
 
     <ConnectionDialog v-if="connectionDialog" :initial="connectionDialog.initial" :editing="connectionDialog.editing" :groups="groups" @save="saveConnection" @close="connectionDialog = null" />
     <SettingsDialog v-if="settingsOpen" :settings="settings" :palette="palette" :key-page-sizes="keyPageSizes"
-      :release="releaseConfig" :checking="checkingUpdates" @check="checkForUpdate(true)" @close="settingsOpen = false" />
+      :release="releaseConfig" :checking="checkingUpdates || updating" @check="checkForUpdate(true)" @close="settingsOpen = false" />
     <ShortcutsDialog v-if="shortcutsOpen" @close="shortcutsOpen = false" />
     <WorkspaceDialog v-if="question" :title-id="'question-title-' + question.id" :description-id="question.text ? 'question-description-' + question.id : undefined" @close="answer(false)">
       <template #default="{ requestClose, titleId, descriptionId }">

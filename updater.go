@@ -1,13 +1,11 @@
 package main
 
 import (
-	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"errors"
 	"log"
 	"net/url"
-	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/updater"
@@ -42,11 +40,11 @@ func updateSettings(version, manifestURL, publicKey string) (*updater.Config, er
 		CurrentVersion: version,
 		Providers:      []updater.Provider{provider},
 		PublicKey:      key,
-		CheckInterval:  6 * time.Hour,
+		Window:         updater.WindowNone,
 	}, nil
 }
 
-// configureUpdater installs Wails's update UI for an explicitly configured release channel.
+// configureUpdater initializes the signed release channel.
 func configureUpdater(app *application.App) bool {
 	settings, err := updateSettings(appVersion, updateManifestURL, updatePublicKey)
 	if err != nil {
@@ -60,14 +58,5 @@ func configureUpdater(app *application.App) bool {
 		log.Print(err)
 		return false
 	}
-	menu := app.Menu.New()
-	menu.AddSubmenu("App").Add("Check for Updates…").OnClick(func(_ *application.Context) {
-		go func() {
-			if err := app.Updater.CheckAndInstall(context.Background()); err != nil {
-				log.Print(err)
-			}
-		}()
-	})
-	app.Menu.Set(menu)
 	return true
 }

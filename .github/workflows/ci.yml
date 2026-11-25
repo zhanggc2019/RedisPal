@@ -66,6 +66,7 @@ jobs:
     if: github.ref_type == 'tag' && github.event.created
     env:
       APP_VERSION: ${{ needs.test.outputs.version }}
+      REDISPAL_UPDATE_PUBLIC_KEY: ${{ vars.REDISPAL_UPDATE_PUBLIC_KEY }}
       CGO_ENABLED: '0'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -96,7 +97,12 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Path release | Out-Null
-          ./build.ps1 -AppVersion $env:APP_VERSION -Installer
+          if ($env:REDISPAL_UPDATE_PUBLIC_KEY -cnotmatch '^[A-Za-z0-9+/]{43}=$') {
+            throw 'Configure REDISPAL_UPDATE_PUBLIC_KEY before building a signed release.'
+          }
+          $manifestUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/latest/download/update-manifest.json"
+          ./build.ps1 -AppVersion $env:APP_VERSION -Installer `
+            -UpdateManifestURL $manifestUrl -UpdatePublicKey $env:REDISPAL_UPDATE_PUBLIC_KEY
           Copy-Item -LiteralPath bin/RedisPal.exe -Destination release/RedisPal-windows-x64.exe
           Copy-Item -LiteralPath bin/RedisPal-windows-x64-setup.exe -Destination release/RedisPal-windows-x64-setup.exe
       - name: Test the Windows application and release checker
@@ -126,6 +132,16 @@ jobs:
         with:
           name: RedisPal-${{ needs.test.outputs.tag }}-windows-x64
           path: release
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.x'
+      - name: Sign the update artifact and generate its manifest
+        env:
+          REDISPAL_UPDATE_PRIVATE_KEY: ${{ secrets.REDISPAL_UPDATE_PRIVATE_KEY }}
+          REDISPAL_UPDATE_PUBLIC_KEY: ${{ vars.REDISPAL_UPDATE_PUBLIC_KEY }}
+        run: |
+          go run ./.github/scripts/update-manifest.go sign "$GITHUB_REPOSITORY" "$TAG" \
+            release/RedisPal-windows-x64.exe release/update-manifest.json
       - name: Publish the tested build against its existing tag
         shell: bash
         run: |
@@ -139,10 +155,10 @@ jobs:
           sha256sum "${binaries[@]}" > SHA256SUMS
           if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
             if [[ "$draft" == 'true' ]]; then
-              gh release upload "$TAG" "${binaries[@]}" SHA256SUMS --clobber
+              gh release upload "$TAG" "${binaries[@]}" SHA256SUMS update-manifest.json --clobber
               gh release edit "$TAG" --draft=false
             fi
           else
-            gh release create "$TAG" "${binaries[@]}" SHA256SUMS \
+            gh release create "$TAG" "${binaries[@]}" SHA256SUMS update-manifest.json \
               --verify-tag --title "RedisPal $TAG" --generate-notes
           fi

@@ -63,10 +63,22 @@ git push origin v0.0.7
 
 标签推送会触发测试、Windows x64 构建和 GitHub Release。软件显示的版本直接取自标签，例如推送 `v0.0.7` 后，设置和发布页都会显示 `v0.0.7`。设置的「更新」页也提供项目 GitHub 仓库链接。
 
-[GitHub Releases](https://github.com/zhanggc2019/RedisPal/releases) 提供免安装版 `RedisPal-windows-x64.exe`、安装包 `RedisPal-windows-x64-setup.exe` 和两者的 `SHA256SUMS`。应用启动后及运行期间每六小时会检查正式版本，也可在设置中点击「检查更新」。发现新版时，点击「查看并下载」可打开对应发布页。
+[GitHub Releases](https://github.com/zhanggc2019/RedisPal/releases) 提供免安装版 `RedisPal-windows-x64.exe`、安装包 `RedisPal-windows-x64-setup.exe`、`SHA256SUMS` 和签名更新清单 `update-manifest.json`。RedisPal 启动时和运行期间每六小时检查正式版本，也可在设置中点击「检查更新」。签名版发现新版后，点击「安装更新」会下载并验签，成功后可选择「立即重启」或「稍后」。选择「稍后」后，可在本次运行期间重新检查更新以打开重启提示。v0.0.7 及更早提供「查看并下载」的版本需要从发布页手动升级一次。
+
+首次发布签名版前，在仓库根目录运行以下 PowerShell 命令。先安装并登录有仓库管理权限的 GitHub CLI，再将密钥生成到仓库外。私钥文件请妥善保管。
+
+```powershell
+$privateKeyFile = Join-Path $env:USERPROFILE 'redispal-update.key'
+$publicKey = go run ./.github/scripts/update-manifest.go keygen $privateKeyFile
+if ($LASTEXITCODE -ne 0) { throw 'RedisPal update key generation failed' }
+Get-Content -Raw -LiteralPath $privateKeyFile | gh secret set REDISPAL_UPDATE_PRIVATE_KEY --repo zhanggc2019/RedisPal
+gh variable set REDISPAL_UPDATE_PUBLIC_KEY --body $publicKey --repo zhanggc2019/RedisPal
+```
+
+发布流水线将公钥嵌入应用，用私钥签署免安装版 EXE 并生成更新清单。已发布的签名版使用内置公钥验证后续更新，请保留对应的私钥备份。
 
 ## 启动参数和自定义更新源
 
 可通过 `--host`、`--port`、`--auth`、`--username`、`--cluster`、`--readonly`、`--ssh-*`、`--ssl-*` 和 `--sentinel-*` 等启动参数配置连接。加上 `--save` 可保存通过命令行创建的连接。
 
-如需自托管签名更新源，可通过 `build.ps1 -AppVersion <版本> -UpdateManifestURL <HTTPS 地址> -UpdatePublicKey <Base64 公钥>` 接入 Wails 更新清单。配置成功后，应用会使用该更新源，App 菜单也可手动检查。[Wails 更新清单协议](https://v3.wails.io/reference/update-manifest/)
+如需自托管签名更新源，可通过 `build.ps1 -AppVersion <版本> -UpdateManifestURL <HTTPS 地址> -UpdatePublicKey <Base64 公钥>` 接入 Wails 更新清单。配置成功后，可在设置的「更新」页检查该更新源。[Wails 更新清单协议](https://v3.wails.io/reference/update-manifest/)

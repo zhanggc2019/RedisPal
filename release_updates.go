@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/wailsapp/wails/v3/pkg/updater"
 	"golang.org/x/mod/semver"
 )
 
@@ -23,6 +25,7 @@ const (
 type ReleaseConfiguration struct {
 	Version       string `json:"version"`
 	GitHub        bool   `json:"github"`
+	Signed        bool   `json:"signed"`
 	RepositoryURL string `json:"repositoryUrl"`
 }
 
@@ -30,14 +33,18 @@ type ReleaseConfiguration struct {
 type ReleaseUpdate struct {
 	Version string `json:"version"`
 	URL     string `json:"url"`
+	Ready   bool   `json:"ready"`
 }
 
-// ReleaseUpdates exposes version checks to the workspace without downloading or running binaries.
+// ReleaseUpdates coordinates version checks and user-initiated updates.
 type ReleaseUpdates struct {
 	version  string
 	endpoint string
 	client   *http.Client
-	signed   bool
+	native   *updater.Updater
+	mu       sync.Mutex
+	pending  string
+	ready    string
 }
 
 // newReleaseUpdates pins the default feed to RedisPal's GitHub repository.
@@ -53,13 +60,32 @@ func newReleaseUpdates(version string) *ReleaseUpdates {
 func (s *ReleaseUpdates) Configuration() ReleaseConfiguration {
 	return ReleaseConfiguration{
 		Version:       s.version,
-		GitHub:        !s.signed && s.endpoint != "",
+		GitHub:        s.native == nil && s.endpoint != "",
+		Signed:        s.native != nil,
 		RepositoryURL: releaseRepositoryURL,
 	}
 }
 
-// Check finds a newer stable GitHub release and constructs its official release URL.
+// Check discovers updates without downloading an executable.
 func (s *ReleaseUpdates) Check(ctx context.Context) (ReleaseUpdate, error) {
+	if s.native != nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.ready != "" {
+			return ReleaseUpdate{Version: s.ready, Ready: true}, nil
+		}
+		s.pending = ""
+		release, err := s.native.Check(ctx)
+		if err != nil || release == nil {
+			return ReleaseUpdate{}, err
+		}
+		version := "v" + strings.TrimPrefix(release.Version, "v")
+		if !semver.IsValid(version) || semver.Prerelease(version) != "" || semver.Compare(version, s.version) <= 0 {
+			return ReleaseUpdate{}, nil
+		}
+		s.pending = version
+		return ReleaseUpdate{Version: version}, nil
+	}
 	var update ReleaseUpdate
 	if !s.Configuration().GitHub {
 		return update, nil
@@ -103,4 +129,29 @@ func (s *ReleaseUpdates) Check(ctx context.Context) (ReleaseUpdate, error) {
 		Version: release.Tag,
 		URL:     releaseRepositoryURL + "/releases/tag/" + url.PathEscape(release.Tag),
 	}, nil
+}
+
+func (s *ReleaseUpdates) PrepareUpdate(ctx context.Context, version string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.native == nil || version == "" || version != s.pending {
+		return errors.New("check for this update again before installing")
+	}
+	if s.ready == version {
+		return nil
+	}
+	if err := s.native.DownloadAndInstall(ctx); err != nil {
+		return err
+	}
+	s.ready = version
+	return nil
+}
+
+func (s *ReleaseUpdates) RestartUpdate(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.native == nil || s.ready == "" {
+		return errors.New("no verified update is ready")
+	}
+	return s.native.Restart(ctx)
 }

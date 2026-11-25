@@ -54,11 +54,12 @@ func main() {
 		},
 		Windows: windows,
 	})
-	updates := configureUpdater(app)
-	releaseUpdates.signed = updates
+	if configureUpdater(app) {
+		releaseUpdates.native = app.Updater
+	}
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title: appName, Width: 1260, Height: 780,
-		MinWidth: 860, MinHeight: 520, URL: "/", UseApplicationMenu: updates,
+		MinWidth: 860, MinHeight: 520, URL: "/",
 	})
 	desktopWindow.attach(app, window)
 	if err := app.Run(); err != nil {

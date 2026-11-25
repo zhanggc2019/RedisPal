@@ -7,8 +7,8 @@ export function call(method, ...args) {
 }
 
 // updateCall invokes the application-level release service.
-export function updateCall(method) {
-  return Call.ByName('main.ReleaseUpdates.' + method)
+export function updateCall(method, ...args) {
+  return Call.ByName('main.ReleaseUpdates.' + method, ...args)
 }
 
 // desktopCall invokes window lifecycle actions on the native application.
