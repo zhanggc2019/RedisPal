@@ -49,7 +49,10 @@ func (d *DesktopWindow) MinimiseToTray(openLabel, quitLabel string) {
 			d.tray.OnClick(d.restore).OnDoubleClick(d.restore).OnRightClick(d.tray.OpenMenu)
 			menu := d.app.Menu.New()
 			d.openItem = menu.Add(openLabel).OnClick(func(*application.Context) { d.restore() })
-			d.quitItem = menu.Add(quitLabel).OnClick(func(*application.Context) { d.app.Quit() })
+			d.quitItem = menu.Add(quitLabel).OnClick(func(*application.Context) {
+				d.restore()
+				d.window.EmitEvent("redispal:tray-quit-requested")
+			})
 			d.tray.SetMenu(menu)
 		} else {
 			d.openItem.SetLabel(openLabel)

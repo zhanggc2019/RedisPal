@@ -3,6 +3,10 @@ import { computed, inject, onBeforeUnmount, ref } from 'vue'
 import { Activity, Download, Play, Square, Trash2 } from '@lucide/vue'
 import { call } from './api.js'
 import { download } from './model.js'
+import EmptyState from './components/EmptyState.vue'
+import IconButton from './components/IconButton.vue'
+import PanelHeader from './components/PanelHeader.vue'
+import StatusNotice from './components/StatusNotice.vue'
 
 const props = defineProps({ tab: Object, connection: Object })
 const tr = inject('tr')
@@ -106,34 +110,35 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="panel profiler-panel">
-    <header class="panel-heading">
-      <div class="panel-title">
-        <div class="eyebrow">{{ connection.name }}</div>
-        <h1><Activity :size="23" />{{ tr('实时监控', 'Profiler') }}</h1>
-      </div>
-      <div class="heading-actions">
-        <NButton size="small" :disabled="!matching.length" @click="exportCapture"><Download :size="15" />{{ tr('导出', 'Export') }}</NButton>
-        <NButton size="small" :disabled="!rows.length" @click="clear"><Trash2 :size="15" />{{ tr('清空记录', 'Clear capture') }}</NButton>
-        <NButton v-if="running" size="small" :disabled="busy" @click="stop"><Square :size="14" />{{ tr('停止监控', 'Stop profiler') }}</NButton>
+    <PanelHeader :icon="Activity">
+      <template #eyebrow>{{ connection.name }}</template>
+      <template #title>{{ tr('实时监控', 'Profiler') }}</template>
+      <template #actions>
+        <NTag size="small" :type="running ? 'success' : 'default'" :bordered="false" role="status">
+          {{ running ? tr('正在监控', 'Capturing') : tr('已停止', 'Stopped') }}
+        </NTag>
+        <IconButton :icon="Download" :label="tr('导出', 'Export')" :disabled="!matching.length" @click="exportCapture" />
+        <IconButton :icon="Trash2" :label="tr('清空记录', 'Clear capture')" :disabled="!rows.length && !dropped" @click="clear" />
+        <NButton v-if="running" size="small" :disabled="busy" @click="stop"><Square :size="14" aria-hidden="true" />{{ tr('停止监控', 'Stop profiler') }}</NButton>
         <NButton v-else size="small" type="primary" :loading="busy" :disabled="busy || connection.readOnly" @click="start">
-          <Play :size="14" />{{ tr('开始监控', 'Start profiler') }}
+          <Play :size="14" aria-hidden="true" />{{ tr('开始监控', 'Start profiler') }}
         </NButton>
-      </div>
-    </header>
-    <NAlert v-if="error" type="error">{{ error }}</NAlert>
+      </template>
+    </PanelHeader>
+    <StatusNotice v-if="error" tone="error" :title="tr('监控失败', 'Profiler capture failed')" :text="error" />
+    <StatusNotice v-if="connection.readOnly" tone="info" :text="tr('只读连接无法启动监控', 'Profiler is unavailable on read-only connections')" />
     <div class="row-tools">
-      <NInput v-model:value="filter" class="profiler-filter" size="small" clearable
-        :placeholder="tr('筛选命令、客户端或数据库', 'Filter commands, clients or databases')"
-        :input-props="{ 'aria-label': tr('筛选监控记录', 'Filter capture') }" />
-      <NTag size="small" :type="running ? 'success' : 'default'" :bordered="false">
-        {{ running ? tr('正在监控', 'Capturing') : tr('已停止', 'Stopped') }}
-      </NTag>
+      <label class="profiler-filter">
+        {{ tr('筛选监控记录', 'Filter capture') }}
+        <NInput v-model:value="filter" size="small" clearable
+          :placeholder="tr('命令、客户端或数据库', 'Command, client or database')" />
+      </label>
       <span class="muted">{{ matching.length }} / {{ rows.length }} {{ tr('条记录', 'events') }}</span>
       <span v-if="dropped" class="muted">{{ tr('采集缓冲区丢弃', 'Capture buffer dropped') }} {{ dropped }}</span>
       <span v-if="connection.mode === 'cluster'" class="muted">{{ tr('监控一个主节点', 'Captures one primary node') }}</span>
-      <span v-if="connection.readOnly" class="muted">{{ tr('只读连接无法启动监控', 'Profiler is unavailable on read-only connections') }}</span>
     </div>
-    <div class="table-wrap">
+    <EmptyState v-if="!matching.length" compact>{{ rows.length ? tr('没有匹配的命令', 'No matching commands') : tr('暂无监控记录', 'No captured commands') }}</EmptyState>
+    <div v-else class="table-wrap">
       <NTable size="small" :bordered="false" class="data-table profiler-table">
         <thead><tr><th>{{ tr('时间', 'Time') }}</th><th>DB</th><th>{{ tr('客户端', 'Client') }}</th><th>{{ tr('命令', 'Command') }}</th></tr></thead>
         <tbody>
@@ -141,7 +146,6 @@ onBeforeUnmount(() => {
             <td>{{ new Date(row.time).toLocaleTimeString() }}</td><td>{{ row.db || '—' }}</td>
             <td class="mono">{{ row.client || '—' }}</td><td class="mono">{{ row.command }}</td>
           </tr>
-          <tr v-if="!matching.length"><td colspan="4" class="empty-cell">{{ tr('暂无监控记录', 'No captured commands') }}</td></tr>
         </tbody>
       </NTable>
     </div>
@@ -149,7 +153,13 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.profiler-filter { flex: 1 1 205px; max-width: 340px; }
+.profiler-panel { padding: 16px; gap: 12px; }
+.profiler-panel :deep(.shared-panel-header) { flex-wrap: wrap; }
+.profiler-panel :deep(.shared-panel-header__actions) { flex: 0 1 auto; flex-wrap: wrap; }
+.profiler-filter { display: grid; gap: 4px; flex: 1 1 205px; min-width: 0; max-width: 340px; color: var(--muted); }
+.table-wrap { border-radius: 6px; }
+.profiler-table { min-width: 320px; }
+.profiler-table :deep(th), .profiler-table :deep(td) { height: 28px; padding-block: 4px; }
 .profiler-table td:nth-child(-n + 3) { white-space: nowrap; width: 1%; }
-.profiler-table td:last-child { white-space: pre-wrap; }
+.profiler-table td:last-child { white-space: pre-wrap; overflow-wrap: anywhere; }
 </style>

@@ -102,7 +102,7 @@ export function createKeyTreeIndex(separator) {
   function add(id, title, siblings) {
     let node = byId.get(id)
     if (!node) {
-      node = { id, title, value: undefined, children: [] }
+      node = { id, title, value: undefined, children: [], descendantCount: 0 }
       byId.set(id, node)
       siblings.push(node)
     }
@@ -115,6 +115,7 @@ export function createKeyTreeIndex(separator) {
         add(identity(value), display(value), nodes).value = value
         continue
       }
+      if (byId.get(identity(value))?.value !== undefined) continue
       const segments = value.split(separator)
       let siblings = nodes
       let path = 't:'
@@ -122,6 +123,7 @@ export function createKeyTreeIndex(separator) {
       for (let i = 0; i < segments.length; i++) {
         path += (i === 0 ? '' : separator) + segments[i]
         node = add(path, segments[i], siblings)
+        if (i < segments.length - 1) node.descendantCount++
         siblings = node.children
       }
       node.value = value
@@ -140,14 +142,13 @@ export async function scanKeyBatches(state, limit, reset, request, isCurrent) {
   if (reset) {
     state.keys.length = 0
     state.pendingKeys.length = 0
-    state.cursor = ''
+    // A null cursor can resume from the beginning until the first reply arrives.
+    state.cursor = null
     state.seen.clear()
   }
   append(state.pendingKeys.splice(0, limit - state.keys.length))
-  let first = reset
-  while ((first || state.cursor) && state.keys.length < limit) {
-    first = false
-    const page = await request(state.cursor)
+  while (state.cursor !== '' && state.keys.length < limit) {
+    const page = await request(state.cursor ?? '')
     if (!isCurrent()) return
     state.cursor = page.cursor
     const room = limit - state.keys.length

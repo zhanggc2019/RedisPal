@@ -8,7 +8,7 @@ const emit = defineEmits(['open', 'toggle', 'check'])
 const viewport = ref(null)
 const scroll = ref(0)
 const height = ref(600)
-const rowHeight = 30
+const rowHeight = 28
 const overscan = 8
 let observer
 
@@ -83,7 +83,7 @@ onUnmounted(() => observer?.disconnect())
         :checked="selected.has(identity(node.value))" @change="emit('check', node.value)">
       <NButton size="small" quaternary class="flat tree-key" :title="node.value === undefined ? node.title : display(node.value)" @click="activate(node)">
         <Folder v-if="node.children.length" :size="14" /><KeyRound v-else :size="13" />
-        <span>{{ node.title || '␀' }}</span>
+        <span>{{ node.title || '␀' }}<template v-if="node.descendantCount">({{ node.descendantCount }})</template></span>
       </NButton>
     </div>
     <div v-if="end < rowCount" :style="{ height: (rowCount - end) * rowHeight + 'px' }"></div>

@@ -1,14 +1,33 @@
 import { darkTheme, lightTheme } from 'naive-ui'
 
+const nativeColors = { light: lightTheme.common, dark: darkTheme.common }
+
+const modeColors = {
+  light: {
+    bg: '#f5f6f8', sidebar: '#f9fafb', panel: '#ffffff', hover: '#eef1f5',
+    border: '#dfe4ea', borderStrong: '#c6cfd9', ink: '#18242f', muted: '#506071',
+    danger: '#a52b40', success: '#218658', warn: '#a56d10',
+    dangerSurface: '#fcecef', dangerBorder: '#eec3cb',
+    successSurface: '#edf8ef', successBorder: '#a4ceb3', successText: '#145737',
+  },
+  dark: {
+    bg: '#14181e', sidebar: '#181c22', panel: '#1b2027', hover: '#252c34',
+    border: '#333b46', borderStrong: '#4e5967', ink: '#edf2f7', muted: '#abb9c7',
+    danger: '#ffacb5', success: '#69c895', warn: '#efbd68',
+    dangerSurface: '#402a30', dangerBorder: '#7c4953',
+    successSurface: '#203b30', successBorder: '#517d64', successText: '#b5f1d2',
+  },
+}
+
 export const themePresets = [
-  { id: 'default', zh: 'Naive UI', en: 'Naive UI', light: lightTheme.common.primaryColor, dark: darkTheme.common.primaryColor },
+  { id: 'default', zh: 'Naive UI', en: 'Naive UI', light: nativeColors.light.primaryColor, dark: nativeColors.dark.primaryColor },
   { id: 'pine', zh: '松绿', en: 'Pine', light: '#156b53', dark: '#74d2ae' },
   { id: 'lake', zh: '湖蓝', en: 'Lake', light: '#205d96', dark: '#86c2f3' },
   { id: 'dusk', zh: '暮紫', en: 'Dusk', light: '#67459b', dark: '#c3a7f2' },
   { id: 'graphite', zh: '石墨', en: 'Graphite', light: '#495463', dark: '#b5c2d3' },
 ]
 
-/** Restore a supported preference or use Naive UI's default palette. */
+/** Restore a supported preference or use the Naive UI palette. */
 export function normalizePreset(value) {
   return themePresets.some(preset => preset.id === value) ? value : themePresets[0].id
 }
@@ -27,46 +46,89 @@ function mix(base, tint, amount) {
 export function appearance(value, mode, font) {
   const preset = themePresets.find(item => item.id === normalizePreset(value))
   const dark = mode === 'dark'
-  const accent = dark ? preset.dark : preset.light
-  const panel = dark ? '#1b2027' : '#ffffff'
-  const bg = dark ? '#14181e' : '#f5f6f8'
-  const sidebar = dark ? '#181c22' : '#f9fafb'
-  const ink = dark ? '#edf2f7' : '#18242f'
-  const muted = dark ? '#abb9c7' : '#506071'
-  const border = dark ? '#333b46' : '#dfe4ea'
-  const hover = dark ? '#252c34' : '#eef1f5'
-  const active = mix(panel, accent, dark ? .19 : .10)
-  const foreground = dark ? mix(accent, '#ffffff', .27) : mix(accent, '#0b1420', .12)
-  const accentHover = mix(accent, dark ? '#ffffff' : '#07111c', .12)
-  const accentPressed = mix(accent, dark ? '#ffffff' : '#07111c', .2)
+  const modeName = dark ? 'dark' : 'light'
+  const colors = modeColors[modeName]
+  const accent = preset[modeName]
+  const native = preset.id === 'default' ? nativeColors[modeName] : null
+  const active = mix(colors.panel, accent, dark ? .19 : .10)
+  const foreground = mix(accent, dark ? '#ffffff' : '#0b1420', dark ? .27 : .12)
+  const accentHover = native?.primaryColorHover ?? mix(accent, dark ? '#ffffff' : '#07111c', .12)
+  const accentPressed = native?.primaryColorPressed ?? mix(accent, dark ? '#ffffff' : '#07111c', .2)
+  const stateColors = base => {
+    const hover = mix(base, dark ? '#ffffff' : '#07111c', .12)
+    return { base, hover, pressed: mix(base, dark ? '#ffffff' : '#07111c', .2), suppl: hover }
+  }
+  const info = stateColors(colors.muted)
+  const success = stateColors(colors.success)
+  const warning = stateColors(colors.warn)
+  const danger = stateColors(colors.danger)
   const onAccent = dark ? '#101a25' : '#ffffff'
   const fontFamily = font || '"Segoe UI", "Microsoft YaHei UI", sans-serif'
 
   return {
     css: {
-      '--bg': bg, '--sidebar': sidebar, '--panel': panel, '--hover': hover,
-      '--border': border, '--border-strong': dark ? '#4e5967' : '#c6cfd9',
-      '--ink': ink, '--muted': muted, '--focus': accent,
-      '--accent': accent,
-      '--accent-text': foreground, '--accent-soft': active,
+      '--bg': colors.bg, '--sidebar': colors.sidebar, '--panel': colors.panel,
+      '--hover': colors.hover, '--border': colors.border, '--border-strong': colors.borderStrong,
+      '--ink': colors.ink, '--muted': colors.muted, '--accent': accent,
+      '--accent-text': foreground, '--accent-soft': active, '--focus': accent,
+      '--danger': colors.danger, '--success': colors.success, '--warn': colors.warn,
+      '--danger-surface': colors.dangerSurface, '--danger-border': colors.dangerBorder,
+      '--success-surface': colors.successSurface, '--success-border': colors.successBorder,
+      '--success-text': colors.successText,
       '--console-prompt': preset.dark,
       '--console-background': '#161b22',
     },
-    naive: preset.id === 'default' ? (font ? { common: { fontFamily: font } } : undefined) : {
+    naive: {
       common: {
-        fontFamily, borderRadius: '8px',
+        fontFamily, fontFamilyMono: '"Consolas", "Cascadia Mono", monospace',
+        fontSize: '13px', fontSizeMini: '11px', fontSizeTiny: '12px',
+        fontSizeSmall: '12px', fontSizeMedium: '13px', fontWeightStrong: '650',
+        borderRadius: '5px', borderRadiusSmall: '5px',
         primaryColor: accent, primaryColorHover: accentHover,
-        primaryColorPressed: accentPressed, primaryColorSuppl: accentHover,
-        textColor1: ink, textColor2: ink, textColor3: muted,
-        bodyColor: bg, cardColor: panel, modalColor: panel, popoverColor: panel,
-        inputColor: panel, borderColor: border, dividerColor: border, hoverColor: hover,
+        primaryColorPressed: accentPressed, primaryColorSuppl: native?.primaryColorSuppl ?? accentHover,
+        infoColor: info.base, infoColorHover: info.hover,
+        infoColorPressed: info.pressed, infoColorSuppl: info.suppl,
+        successColor: success.base, successColorHover: success.hover,
+        successColorPressed: success.pressed, successColorSuppl: success.suppl,
+        warningColor: warning.base, warningColorHover: warning.hover,
+        warningColorPressed: warning.pressed, warningColorSuppl: warning.suppl,
+        errorColor: danger.base, errorColorHover: danger.hover,
+        errorColorPressed: danger.pressed, errorColorSuppl: danger.suppl,
+        textColor1: colors.ink, textColor2: colors.ink, textColor3: colors.muted,
+        bodyColor: colors.bg, cardColor: colors.panel, modalColor: colors.panel, popoverColor: colors.panel,
+        inputColor: colors.panel, actionColor: colors.panel, tagColor: colors.hover,
+        tableColor: colors.panel, tableHeaderColor: colors.sidebar,
+        tableColorHover: colors.hover, tableColorStriped: colors.sidebar,
+        tabColor: colors.panel, codeColor: colors.bg, buttonColor2: colors.hover, pressedColor: active,
+        borderColor: colors.border, dividerColor: colors.border, hoverColor: colors.hover,
       },
       Button: {
+        heightSmall: '28px', heightMedium: '32px', fontSizeSmall: '12px', fontSizeMedium: '13px',
         textColorPrimary: onAccent, textColorHoverPrimary: onAccent,
         textColorPressedPrimary: onAccent, textColorFocusPrimary: onAccent,
         fontWeightStrong: '650',
       },
-      Input: { placeholderColor: muted, border: `1px solid ${border}` },
+      Card: {
+        borderRadius: '6px',
+      },
+      DataTable: {
+        borderRadius: '6px',
+      },
+      Dialog: {
+        borderRadius: '8px',
+      },
+      Input: {
+        heightSmall: '30px', heightMedium: '32px', fontSizeSmall: '12px', fontSizeMedium: '13px',
+        borderRadius: '5px', placeholderColor: colors.muted,
+        border: `1px solid ${colors.border}`, borderHover: `1px solid ${colors.borderStrong}`,
+        borderFocus: `1px solid ${accent}`,
+      },
+      Tag: {
+        textColorPrimary: foreground, colorPrimary: active,
+        textColorSuccess: colors.successText, colorSuccess: colors.successSurface,
+        textColorWarning: dark ? colors.warn : colors.ink, colorWarning: colors.hover,
+        textColorError: colors.danger, colorError: colors.dangerSurface,
+      },
     },
   }
 }

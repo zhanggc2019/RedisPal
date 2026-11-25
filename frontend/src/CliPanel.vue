@@ -5,6 +5,8 @@ import { call, command } from './api.js'
 import { allCMD } from './commands.js'
 import { pretty } from './formats.js'
 import { display, splitCommand } from './model.js'
+import PanelHeader from './components/PanelHeader.vue'
+import StatusNotice from './components/StatusNotice.vue'
 
 const props = defineProps({ tab: Object, visible: Boolean, connection: Object })
 const tr = inject('tr')
@@ -183,15 +185,18 @@ onUnmounted(() => {
 
 <template>
   <div class="panel cli-panel">
-    <header class="panel-heading">
-      <div class="panel-title"><div class="eyebrow">{{ connection.name }} · DB {{ db }}</div><h1><Terminal :size="23" />Redis CLI</h1></div>
-      <div class="heading-actions">
-        <NButton size="small" v-if="mode" @click="stop()"><Square :size="14" />{{ tr('停止接收', 'Stop feed') }}</NButton>
-        <NButton size="small" :disabled="busy" @click="fileInput.click()"><Upload :size="15" />{{ tr('执行文件', 'Run file') }}</NButton>
-        <NButton size="small" @click="entries = []"><Eraser :size="16" />{{ tr('清屏', 'Clear') }}</NButton>
+    <PanelHeader :icon="Terminal">
+      <template #eyebrow>{{ connection.name }} · DB {{ db }}</template>
+      <template #title>Redis CLI</template>
+      <template #actions>
+        <NButton v-if="mode" size="small" @click="stop().catch(error => write(error.message, 'error'))"><Square :size="14" aria-hidden="true" />{{ tr('停止接收', 'Stop feed') }}</NButton>
+        <NButton size="small" :disabled="busy" @click="fileInput.click()"><Upload :size="15" aria-hidden="true" />{{ tr('执行文件', 'Run file') }}</NButton>
+        <NButton size="small" @click="entries = []"><Eraser :size="16" aria-hidden="true" />{{ tr('清屏', 'Clear') }}</NButton>
         <input ref="fileInput" type="file" hidden @change="runFile">
-      </div>
-    </header>
+      </template>
+    </PanelHeader>
+    <StatusNotice v-if="connection.readOnly" tone="info" :title="tr('只读连接', 'Read-only connection')"
+      :text="tr('可以运行读取命令。写入命令会被拒绝。', 'You can run read commands. Write commands will be rejected.')" />
     <div class="terminal">
       <div ref="output" class="console-output" role="log" aria-live="polite">
         <pre v-if="!entries.length" class="console-empty">{{ tr('输入 Redis 命令。使用 ↑ / ↓ 浏览历史，Tab 自动补全。', 'Enter a Redis command. Use ↑ / ↓ for history and Tab to complete.') }}</pre>
@@ -207,3 +212,11 @@ onUnmounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.cli-panel { gap: 12px; padding: 16px; }
+.cli-panel :deep(.shared-panel-header) { flex-wrap: wrap; }
+.cli-panel :deep(.shared-panel-header__eyebrow) { overflow-wrap: anywhere; }
+.cli-panel :deep(.shared-panel-header__actions) { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.console-help { overflow-wrap: anywhere; }
+</style>

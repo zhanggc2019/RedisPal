@@ -54,6 +54,9 @@ func TestSignedUpdatesDisableGitHubDiscovery(t *testing.T) {
 	if configuration := service.Configuration(); configuration.Version != "v0.0.1" || configuration.GitHub {
 		t.Fatalf("unexpected configuration: %+v", configuration)
 	}
+	if got := service.Configuration().RepositoryURL; got != "https://github.com/zhanggc2019/RedisPal" {
+		t.Fatalf("unexpected repository URL: %q", got)
+	}
 	if result, err := service.Check(t.Context()); err != nil || result.Version != "" {
 		t.Fatalf("signed build queried the default release feed: %+v, %v", result, err)
 	}

@@ -1,11 +1,16 @@
 <script setup>
 import { inject, onUnmounted, ref, shallowRef, useId } from 'vue'
-import { Radio } from '@lucide/vue'
-import { call, command } from './api.js'
+import { Copy, Radio, Trash2 } from '@lucide/vue'
+import { call, Clipboard, command } from './api.js'
 import { display } from './model.js'
+import EmptyState from './components/EmptyState.vue'
+import IconButton from './components/IconButton.vue'
+import PanelHeader from './components/PanelHeader.vue'
+import StatusNotice from './components/StatusNotice.vue'
 
 const props = defineProps({ tab: Object, connection: Object })
 const tr = inject('tr')
+const notify = inject('notify')
 const formId = useId()
 const subscriptionMode = ref('SUBSCRIBE')
 const subscriptionChannel = ref('')
@@ -106,6 +111,15 @@ function clearMessages() {
   dropped.value = 0
 }
 
+async function copyMessage(item) {
+  try {
+    await Clipboard.SetText(display(item.value))
+    notify(tr('已复制消息', 'Message copied'))
+  } catch (failure) {
+    notify(tr(`复制消息失败：${failure.message || failure}`, `Could not copy message: ${failure.message || failure}`), true)
+  }
+}
+
 onUnmounted(() => {
   closed = true
   stopSubscription()
@@ -113,13 +127,11 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="panel">
-    <header class="panel-heading">
-      <div class="panel-title">
-        <div class="eyebrow">{{ connection.name }}</div>
-        <h1><Radio :size="23" />{{ tr('发布订阅', 'Pub/Sub') }}</h1>
-      </div>
-    </header>
+  <section class="panel pubsub-panel">
+    <PanelHeader :icon="Radio">
+      <template #eyebrow>{{ connection.name }}</template>
+      <template #title>{{ tr('发布订阅', 'Pub/Sub') }}</template>
+    </PanelHeader>
 
     <div class="exchange">
       <form class="exchange-form" @submit.prevent="startSubscription">
@@ -145,11 +157,11 @@ onUnmounted(() => {
         </div>
         <div class="form-actions">
           <NButton v-if="subscription" size="small" @click="stopSubscription">{{ tr('停止订阅', 'Stop subscription') }}</NButton>
-          <NButton v-else size="small" type="primary" attr-type="submit" :loading="subscriptionBusy" :disabled="!subscriptionChannel">
+          <NButton v-else size="small" type="primary" attr-type="submit" :loading="subscriptionBusy" :disabled="subscriptionBusy || !subscriptionChannel">
             {{ tr('开始订阅', 'Start subscription') }}
           </NButton>
         </div>
-        <p v-if="subscriptionError" class="notice error" role="alert">{{ subscriptionError }}</p>
+        <StatusNotice v-if="subscriptionError" tone="error" :title="tr('订阅失败', 'Subscription failed')" :text="subscriptionError" />
       </form>
 
       <form class="exchange-form" @submit.prevent="publish">
@@ -178,11 +190,11 @@ onUnmounted(() => {
           <p v-if="publishResult !== null" class="muted publish-result" role="status">
             {{ tr(`已发布 · ${publishResult} 个订阅客户端接收`, `Published · ${publishResult} ${publishResult === 1 ? 'receiving client' : 'receiving clients'}`) }}
           </p>
-          <NButton size="small" type="primary" attr-type="submit" :loading="publishBusy" :disabled="connection.readOnly || !publishChannel">
+          <NButton size="small" type="primary" attr-type="submit" :loading="publishBusy" :disabled="connection.readOnly || publishBusy || !publishChannel">
             {{ tr('发布', 'Publish') }}
           </NButton>
         </div>
-        <p v-if="publishError" class="notice error" role="alert">{{ publishError }}</p>
+        <StatusNotice v-if="publishError" tone="error" :title="tr('发布失败', 'Publish failed')" :text="publishError" />
       </form>
     </div>
 
@@ -196,12 +208,13 @@ onUnmounted(() => {
             <template v-if="dropped">{{ tr(` · 缓冲区跳过 ${dropped} 条`, ` · ${dropped} dropped from the buffer`) }}</template>
           </p>
         </div>
-        <NButton size="small" :disabled="!received && !dropped" @click="clearMessages">{{ tr('清空记录', 'Clear messages') }}</NButton>
+        <IconButton :icon="Trash2" :label="tr('清空记录', 'Clear messages')" :disabled="!received && !dropped" @click="clearMessages" />
       </header>
-      <div class="table-wrap inbox-table">
+      <EmptyState v-if="!messages.length" compact>{{ subscription ? tr('正在等待消息', 'Waiting for messages') : tr('订阅后可在此查看实时消息', 'Subscribe to receive messages here') }}</EmptyState>
+      <div v-else class="table-wrap inbox-table">
         <NTable size="small" :bordered="false" class="data-table messages">
           <thead>
-            <tr><th>{{ tr('接收时间', 'Received at') }}</th><th>{{ tr('频道', 'Channel') }}</th><th>{{ tr('方式', 'Mode') }}</th><th>{{ tr('消息', 'Message') }}</th></tr>
+            <tr><th>{{ tr('接收时间', 'Received at') }}</th><th>{{ tr('频道', 'Channel') }}</th><th>{{ tr('方式', 'Mode') }}</th><th>{{ tr('消息', 'Message') }}</th><th>{{ tr('操作', 'Actions') }}</th></tr>
           </thead>
           <tbody>
             <tr v-for="item in messages" :key="item.id">
@@ -209,9 +222,7 @@ onUnmounted(() => {
               <td class="mono">{{ item.channel }}</td>
               <td class="mono muted">{{ item.mode }}</td>
               <td><pre v-if="item.value !== ''" class="payload">{{ display(item.value) }}</pre><span v-else class="muted">{{ tr('空消息', 'Empty message') }}</span></td>
-            </tr>
-            <tr v-if="!messages.length">
-              <td colspan="4" class="empty-cell">{{ subscription ? tr('正在等待消息', 'Waiting for messages') : tr('订阅后可在此查看实时消息', 'Subscribe to receive messages here') }}</td>
+              <td class="row-ops"><IconButton :icon="Copy" :label="tr('复制消息', 'Copy message')" @click="copyMessage(item)" /></td>
             </tr>
           </tbody>
         </NTable>
@@ -221,24 +232,34 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.pubsub-panel { container-type: inline-size; padding: 16px; gap: 12px; }
 .exchange { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .exchange-form {
-  align-self: start; display: grid; gap: 10px; min-width: 0; padding: 14px;
-  border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
+  align-self: start; display: grid; gap: 8px; min-width: 0; padding: 12px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--panel);
 }
-.exchange-form header, .inbox header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.exchange-form h2, .inbox h2 { font-size: 14px; }
-.exchange-form .field, .exchange-form > label { display: grid; gap: 5px; color: var(--muted); font-size: 13px; }
+.exchange-form header, .inbox header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.exchange-form h2, .inbox h2 { font-size: 14px; font-weight: 650; }
+.exchange-form .field, .exchange-form > label { display: grid; gap: 4px; color: var(--muted); font-size: 13px; }
+.exchange-form select { width: 100%; }
 .exchange-form .form-actions { flex-wrap: wrap; justify-content: flex-end; }
 .publish-result { margin-right: auto; }
-.inbox { display: grid; gap: 9px; min-width: 0; }
-.inbox p { font-size: 12px; margin-top: 3px; }
-.inbox-table { max-height: min(55vh, 620px); }
+.inbox { display: grid; gap: 8px; min-width: 0; }
+.inbox p { font-size: 12px; margin-top: 4px; }
+.inbox-table { max-height: min(55vh, 620px); border-radius: 6px; }
+.messages { min-width: 400px; }
+.messages :deep(th), .messages :deep(td) { height: 28px; padding-block: 4px; }
 .messages :deep(th) { position: sticky; top: 0; }
-.messages :deep(td:first-child), .messages :deep(td:nth-child(3)) { width: 1%; white-space: nowrap; }
-.messages :deep(td:nth-child(2)) { width: 23%; }
-.payload { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-@media (max-width: 880px) {
-  .exchange { grid-template-columns: 1fr; }
+.messages td:first-child, .messages td:nth-child(3) { width: 1%; white-space: nowrap; }
+.messages td:nth-child(2) { width: 23%; }
+.payload {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5;
+  margin: 0; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55;
+}
+@media (max-width: 1024px) {
+  .exchange { grid-template-columns: minmax(0, 1fr); }
+}
+@container (max-width: 640px) {
+  .exchange { grid-template-columns: minmax(0, 1fr); }
 }
 </style>

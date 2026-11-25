@@ -1,26 +1,36 @@
 <script setup>
-import { computed, inject, ref, watch } from 'vue'
+import { computed, inject, ref, shallowRef, watch } from 'vue'
+import IconButton from './components/IconButton.vue'
 import { Copy, Download, Play, Upload } from '@lucide/vue'
 import { call, Clipboard } from './api.js'
 import { download, toBytes, display, splitCommand } from './model.js'
 import { encodeEdited, formats, guessFormat, renderFormat, writableFormats } from './formats.js'
 
-const props = defineProps({ value: null, readOnly: Boolean, label: String, fixed: String, scope: String, compact: Boolean })
+const props = defineProps({ value: null, sourceVersion: Date, readOnly: Boolean, label: String, fixed: String, scope: String, compact: Boolean })
+const emit = defineEmits(['dirty', 'rendering'])
 const tr = inject('tr')
 const ask = inject('ask')
 const notify = inject('notify')
 const mode = ref(props.fixed || guessFormat(props.value))
-const source = ref(props.value)
-const text = ref('')
+const source = shallowRef(props.value)
+const draft = shallowRef(null)
+const pendingSave = ref(false)
+const rendered = ref('')
 const baseline = ref('')
 const failure = ref('')
+const rendering = ref(false)
 const protoInput = ref(null)
 const schema = ref(readLocal('ardm-proto-' + props.scope))
 const showFull = ref(false)
 const byteLength = computed(() => toBytes(source.value ?? '').byteLength)
-const oversized = computed(() => byteLength.value > 2 * 1024 * 1024 && !showFull.value)
-const writable = computed(() => !oversized.value && !props.readOnly && writableFormats.includes(mode.value))
+const oversized = computed(() => !draft.value && byteLength.value > 2 * 1024 * 1024 && !showFull.value)
+const text = computed(() => draft.value?.mode === mode.value ? draft.value.text : rendered.value)
+const writable = computed(() => !oversized.value && !rendering.value && !failure.value && !props.readOnly && writableFormats.includes(mode.value))
 let renderID = 0
+let displayedDraft = null
+let lastEdit = null
+watch(() => Boolean(draft.value) || pendingSave.value, dirty => emit('dirty', dirty), { immediate: true, flush: 'sync' })
+watch(rendering, busy => emit('rendering', busy), { immediate: true, flush: 'sync' })
 
 /** Read optional formatter preferences from local storage. */
 function readLocal(key) {
@@ -31,58 +41,118 @@ function readLocal(key) {
   }
 }
 
-/** Render a format while dropping stale decoder results after a rapid mode change. */
+/** Render the saved value and the draft independently, ignoring superseded decoders. */
 async function refresh(custom) {
   const id = ++renderID
+  const selected = mode.value
+  const pending = draft.value
+  const saved = source.value
   failure.value = ''
-  if (oversized.value) {
-    text.value = ''
+  rendering.value = !oversized.value
+  if (!rendering.value) {
+    rendered.value = ''
     baseline.value = ''
+    displayedDraft = null
     return
   }
+  const render = value => renderFormat(selected, value, schema.value, custom, call)
   try {
-    const rendered = await renderFormat(mode.value, source.value, schema.value, custom, call)
-    if (id === renderID) {
-      text.value = rendered ?? ''
-      baseline.value = text.value
+    const editable = writableFormats.includes(selected)
+    const original = !pending || editable ? await render(saved) ?? '' : ''
+    if (id !== renderID) return
+    const working = pending?.mode === selected ? pending.text : pending ? await render(getValue()) ?? '' : original
+    if (id !== renderID) return
+    baseline.value = original
+    rendered.value = working
+    displayedDraft = pending
+    if (pending && editable && working === original && saved != null && matchesSavedBytes(saved)) {
+      displayedDraft = null
+      draft.value = null
     }
   } catch (error) {
-    if (id === renderID) {
-      text.value = ''
-      failure.value = error.message
-    }
+    if (id !== renderID) return
+    rendered.value = ''
+    failure.value = error.message
+  } finally {
+    if (id === renderID) rendering.value = false
   }
 }
 
-watch(() => props.value, (value, previous) => {
+watch([() => props.value, () => props.fixed, () => props.sourceVersion], ([value, fixed], [previous, previousFixed]) => {
+  if (value !== source.value) showFull.value = false
   source.value = value
-  showFull.value = false
-  if (previous == null && !props.fixed) mode.value = guessFormat(value)
-  refresh()
+  if (fixed !== previousFixed || (previous == null && !draft.value)) mode.value = fixed || guessFormat(value)
+  void refresh()
 }, { immediate: true })
 
-/** Return the editor's current raw value for a Redis write. */
-function getValue() {
-  if (!writable.value || (text.value === baseline.value && source.value != null)) return source.value
-  return encodeEdited(mode.value, text.value)
+function editText(next) {
+  if (!writable.value) return
+  lastEdit = { mode: mode.value, text: next }
+  if (next === rendered.value && displayedDraft) {
+    draft.value = displayedDraft
+  } else if (next === baseline.value && source.value != null) {
+    lastEdit.raw = source.value
+    rendered.value = baseline.value
+    displayedDraft = null
+    draft.value = null
+  } else {
+    draft.value = lastEdit
+  }
 }
 
-/** Preserve a draft when moving between editable formats. */
-async function changeFormat(event) {
-  const target = event.target.value
-  let raw = source.value
-  if (writable.value && text.value !== baseline.value) {
-    try {
-      raw = getValue()
-    } catch (error) {
-      event.target.value = mode.value
-      notify(error, true)
-      return
-    }
+/** Keep the exact saved bytes or encode the draft in the format where it was edited. */
+function getValue() {
+  const pending = draft.value
+  return pending ? pending.raw ?? encodeEdited(pending.mode, pending.text) : source.value
+}
+
+function matchesSavedBytes(saved) {
+  try {
+    const draftBytes = toBytes(getValue())
+    const savedBytes = toBytes(saved)
+    return draftBytes.length === savedBytes.length && draftBytes.every((byte, index) => byte === savedBytes[index])
+  } catch {
+    return false
   }
-  source.value = raw
+}
+
+/** Rebase after a write while retaining edits made after the request started. */
+function getSubmission() {
+  const submitted = draft.value
+  const edit = lastEdit
+  const value = getValue()
+  pendingSave.value = Boolean(submitted)
+  return {
+    value,
+    accept() {
+      source.value = value
+      if (lastEdit === edit || draft.value === submitted) draft.value = null
+      else if (!draft.value) draft.value = lastEdit
+      void refresh()
+    },
+    finish() {
+      pendingSave.value = false
+    },
+  }
+}
+
+function discardDraft() {
+  draft.value = null
+  void refresh()
+}
+
+/** Leave invalid input available for correction instead of dropping it on format change. */
+function changeFormat(event) {
+  const target = event.target.value
+  try {
+    if (draft.value?.mode === mode.value) getValue()
+  } catch (error) {
+    event.target.value = mode.value
+    notify(error, true)
+    return
+  }
   mode.value = target
-  await refresh()
+  void refresh()
 }
 
 /** Copy a view without executing any content in the decoded value. */
@@ -136,7 +206,7 @@ async function runCustom(configure = false) {
   }
 }
 
-defineExpose({ getValue })
+defineExpose({ getValue, getSubmission, discardDraft })
 </script>
 
 <template>
@@ -154,15 +224,21 @@ defineExpose({ getValue })
       </template>
       <span class="muted editor-bytes">{{ byteLength.toLocaleString() }} B</span>
       <span class="spacer"></span>
-      <NButton size="small" quaternary class="flat icon" :title="tr('复制值', 'Copy value')" @click="copy"><Copy :size="15" /></NButton>
-      <NButton size="small" quaternary class="flat icon" :title="tr('保存原始值到文件', 'Download raw value')" @click="download('redis-value.bin', toBytes(value ?? ''), 'application/octet-stream')"><Download :size="15" /></NButton>
+      <IconButton :label="tr('复制值', 'Copy value')" :icon="Copy" :disabled="rendering" @click="copy" />
+      <IconButton :label="tr('保存原始值到文件', 'Download raw value')" :icon="Download" @click="download('redis-value.bin', toBytes(source ?? ''), 'application/octet-stream')" />
       <input ref="protoInput" type="file" hidden multiple accept=".proto" @change="loadProto">
     </div>
-    <p v-if="failure" class="notice error">{{ failure }}</p>
+    <p v-if="failure" class="notice error" role="alert">{{ failure }}</p>
     <div v-if="oversized" class="empty-panel">
       <NButton size="small" @click="showFull = true; refresh()">{{ tr('加载完整值', 'Load full value') }}</NButton>
     </div>
-    <NInput v-else v-model:value="text" class="editor-input" type="textarea" :rows="compact ? 7 : 13"
-      :readonly="!writable" :input-props="{ 'aria-label': label || tr('值', 'Value'), spellcheck: false }" />
+    <NInput v-else :value="text" class="editor-input" type="textarea" :rows="compact ? 7 : 13"
+      :readonly="!writable" :input-props="{ 'aria-label': label || tr('值', 'Value'), spellcheck: false }" @update:value="editText" />
   </div>
 </template>
+
+<style scoped>
+.value-toolbar {
+  flex-wrap: wrap;
+}
+</style>

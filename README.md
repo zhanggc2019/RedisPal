@@ -4,7 +4,7 @@ RedisPal 是一款使用 Go、Wails 3.1 和 Vue 3 开发的 Redis 桌面客户�
 
 ## Windows 构建
 
-需要 Go 1.26.10 或更新版、Node.js 22.12 或更新版，以及 Microsoft Edge WebView2 Runtime。从本目录运行以下命令。
+需要 Go 1.27 或更新版、Node.js 22.12 或更新版，以及 Microsoft Edge WebView2 Runtime。从本目录运行以下命令。
 
 ```powershell
 .\build.ps1
@@ -27,13 +27,13 @@ foreach ($arch in 'amd64', 'arm64') {
 ## 功能
 
 - 单机、Cluster、Sentinel、ACL、SSH 和 TLS 连接，支持分组、克隆、连通性测试和只读模式。可将已有连接拖到左侧分组标题。SSH 使用系统或指定的 `known_hosts` 文件验证主机密钥。
-- 数据库切换和命名、键的精确及通配符搜索、树形及平铺视图、分页、批量删除、导入导出。键列表默认每批加载 10,000 个键。键备份可导出为 JSON，也可从 JSON 或兼容的 CSV 备份文件导入。支持将键复制到同一连接的其他数据库，或通过备份迁移到其他连接。
+- 数据库切换和命名、键的精确及通配符搜索、树形及平铺视图、分页、批量删除、导入导出。键列表默认每批加载 10,000 个键，可停止并继续加载，树形目录显示已加载的后代键数。键备份可导出为 JSON，也可从 JSON 或兼容的 CSV 备份文件导入。支持将键复制到同一连接的其他数据库，或通过备份迁移到其他连接。
 - String、Hash、List、Set、ZSet、Stream、RedisJSON、TimeSeries、Vector Set 和 Array 的可视化编辑。扩展类型及 Hash 字段 TTL 需要 Redis 服务器支持对应命令。
-- Redis CLI 支持历史、补全和命令文件。「数据库操作」菜单可打开 Pub/Sub、Redis Search、实时监控、慢日志和内存分析。Pub/Sub 支持普通、模式和分片订阅。
+- Redis CLI 支持历史、补全和命令文件。工作区侧栏可打开 Pub/Sub、Redis Search、实时监控、慢日志和内存分析。Pub/Sub 支持普通、模式和分片订阅。内存分析分批显示已扫描批次、匹配键数和已测量键数。
 - Redis Search 支持浏览和创建索引、字段补全、查询收藏、Explain 和 Profile，需要 Redis 服务端提供 `FT.*`。Stream 详情支持实时刷新、消费组和待处理消息管理。
 - 实时监控支持筛选和导出，Cluster 连接观察一个主节点。慢日志支持自动刷新以及按主节点读取和修改阈值与日志长度，依赖服务端 ACL 权限。
 - Text、JSON、Hex、Binary、MessagePack、PHP、Java、Pickle、Protobuf 和压缩格式视图。自定义格式化器直接启动指定程序，将值通过标准输入传入。
-- 浅色、深色、系统主题，字体、缩放和快捷键。界面支持简体中文和英文，首次启动及旧语言设置回退时使用简体中文。
+- 浅色、深色和跟随系统模式，默认使用 Naive UI 配色，支持自选配色、字体、缩放和快捷键。界面支持简体中文和英文，首次启动及旧语言设置回退时使用简体中文。
 
 ## 测试
 
@@ -57,11 +57,11 @@ Playwright 连接独立测试版 EXE 的 WebView2，直接操作界面并通过 
 推送 `main` 或提交 Pull Request 会运行前端和 Redis 集成测试。准备发布时，请在包含本次改动的提交上创建 `vX.Y.Z` 标签并推送到 GitHub。
 
 ```powershell
-git tag -a v0.0.2 -m "RedisPal v0.0.2"
-git push origin v0.0.2
+git tag -a v0.0.7 -m "RedisPal v0.0.7"
+git push origin v0.0.7
 ```
 
-标签推送会触发测试、Windows x64 构建和 GitHub Release。软件显示的版本直接取自标签，例如推送 `v0.0.2` 后，设置和发布页都会显示 `v0.0.2`。
+标签推送会触发测试、Windows x64 构建和 GitHub Release。软件显示的版本直接取自标签，例如推送 `v0.0.7` 后，设置和发布页都会显示 `v0.0.7`。设置的「更新」页也提供项目 GitHub 仓库链接。
 
 [GitHub Releases](https://github.com/zhanggc2019/RedisPal/releases) 提供免安装版 `RedisPal-windows-x64.exe`、安装包 `RedisPal-windows-x64-setup.exe` 和两者的 `SHA256SUMS`。应用启动后及运行期间每六小时会检查正式版本，也可在设置中点击「检查更新」。发现新版时，点击「查看并下载」可打开对应发布页。
 

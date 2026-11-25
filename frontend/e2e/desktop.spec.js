@@ -92,7 +92,7 @@ async function connect(page, name, readOnly = false, endpoint = addr, secret = p
   await expect(result).toBeInViewport()
   await dialog.getByRole('button', { name: 'Save connection' }).click()
   await page.getByRole('button', { name, exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('Connection successful · ' + name)
+  await expect(page.locator('.toast').getByText('Connection successful · ' + name, { exact: true })).toBeVisible()
   await expect(page.getByLabel('Database', { exact: true })).toBeVisible()
 }
 
@@ -127,15 +127,113 @@ async function cleanup(endpoint, secret, ...keys) {
 async function english(page) {
   page.setDefaultTimeout(8_000)
   await page.getByRole('button', { name: /^(设置|Settings)$/ }).click()
+  await page.getByRole('button', { name: /^(常规|General)$/ }).click()
   await page.getByRole('combobox', { name: /^(语言|Language)$/ }).selectOption('en')
   await page.getByRole('dialog').getByRole('button', { name: /^(关闭设置|Close settings)$/ }).click()
 }
 
 /** Launch a graphical database tool from the selected connection's actions. */
 async function databaseTool(page, name) {
-  await page.getByRole('button', { name: 'Database actions', exact: true }).click()
-  await page.getByRole('button', { name, exact: true }).click()
+  await page.getByRole('button', { name: 'Tools', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Database tools' }).getByRole('button', { name, exact: true }).click()
 }
+
+test('desktop workspace menu and sidebar resize support the keyboard', async () => {
+  test.skip(process.platform !== 'win32', 'requires native WebView2')
+  const app = await launch()
+  const { page } = app
+  try {
+    await english(page)
+    const trigger = page.getByRole('button', { name: 'Manage connections', exact: true })
+    await trigger.focus()
+    await trigger.press('Enter')
+    const menu = page.getByRole('menu', { name: 'Workspace actions' })
+    await expect(menu.getByRole('menuitem', { name: 'New group' })).toBeFocused()
+    await page.keyboard.press('End')
+    await expect(menu.getByRole('menuitem', { name: 'Export connections' })).toBeFocused()
+    await page.keyboard.press('ArrowDown')
+    await expect(menu.getByRole('menuitem', { name: 'New group' })).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(menu).toHaveCount(0)
+    await expect(trigger).toBeFocused()
+
+    const separator = page.getByRole('separator', { name: 'Resize sidebar' })
+    await expect(separator).toHaveAttribute('aria-valuenow', '264')
+    await separator.press('Home')
+    await expect(separator).toHaveAttribute('aria-valuenow', '224')
+    await separator.press('ArrowRight')
+    await expect(separator).toHaveAttribute('aria-valuenow', '232')
+  } finally {
+    await app.release()
+  }
+})
+
+test('desktop workbench, settings and connection form fit supported widths and scales', async ({}, info) => {
+  test.skip(process.platform !== 'win32', 'requires native WebView2')
+  const app = await launch()
+  const { page } = app
+  try {
+    await english(page)
+    const cdp = await page.context().newCDPSession(page)
+    for (const [width, scale, theme] of [[1440, 1, 'light'], [1024, 1.25, 'dark'], [860, 1.5, 'system']]) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: 720, deviceScaleFactor: scale, mobile: false })
+      await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' })
+      const settings = page.getByRole('button', { name: 'Settings', exact: true })
+      await settings.click()
+      await page.getByRole('combobox', { name: 'Theme', exact: true }).selectOption(theme)
+      await page.getByRole('combobox', { name: 'Interface zoom', exact: true }).selectOption(String(scale * 100))
+      const dialog = page.getByRole('dialog', { name: 'Settings', exact: true })
+      await expect(dialog).toBeInViewport({ ratio: 1 })
+      await expect(dialog.getByRole('button', { name: 'Done', exact: true })).toBeInViewport({ ratio: 1 })
+      await expect(dialog.getByRole('button', { name: 'Appearance', exact: true })).toHaveAttribute('aria-current', 'true')
+      await page.screenshot({ path: info.outputPath(`${width}-${scale}-settings.png`) })
+      await dialog.getByRole('button', { name: 'Done', exact: true }).click()
+      await expect(settings).toBeFocused()
+      const home = page.getByRole('tabpanel', { name: 'Workspace', exact: true })
+      await expect(home.getByRole('button', { name: 'New connection', exact: true })).toBeInViewport()
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
+      await expect(page.locator('.app')).toHaveAttribute('data-theme', theme === 'light' ? 'light' : 'dark')
+      await page.screenshot({ path: info.outputPath(`${width}-${scale}-workbench.png`) })
+      await expect(page.getByRole('button', { name: /^$/ })).toHaveCount(0)
+
+      await home.getByRole('button', { name: 'New connection', exact: true }).click()
+      const connection = page.getByRole('dialog', { name: 'New connection', exact: true })
+      await expect(connection).toBeInViewport({ ratio: 1 })
+      await expect(connection.getByRole('button', { name: 'Save connection', exact: true })).toBeInViewport({ ratio: 1 })
+      await expect(connection.getByRole('button', { name: /^$/ })).toHaveCount(0)
+      await page.screenshot({ path: info.outputPath(`${width}-${scale}-connection.png`) })
+      await page.keyboard.press('Escape')
+      await expect(home.getByRole('button', { name: 'New connection', exact: true })).toBeFocused()
+    }
+    await cdp.detach()
+  } finally {
+    await app.release()
+  }
+})
+
+test('desktop keeps a failed connection visible and retries on demand', async () => {
+  test.skip(process.platform !== 'win32', 'requires native WebView2')
+  const app = await launch()
+  const { page } = app
+  try {
+    await english(page)
+    await page.getByRole('button', { name: 'New connection', exact: true }).first().click()
+    const dialog = page.getByRole('dialog', { name: 'New connection', exact: true })
+    await dialog.getByLabel('Connection name', { exact: true }).fill('Unavailable Redis')
+    await dialog.getByLabel('Address', { exact: true }).fill('127.0.0.1:' + await port())
+    await dialog.getByRole('button', { name: 'Save connection', exact: true }).click()
+    await page.getByRole('button', { name: 'Unavailable Redis', exact: true }).click()
+    const retry = page.getByRole('button', { name: 'Retry', exact: true })
+    await expect(retry).toBeVisible({ timeout: 22_000 })
+    const failure = page.locator('.connection-state').getByRole('alert')
+    await expect(failure).toBeVisible()
+    await retry.click()
+    await expect(retry).toBeVisible({ timeout: 22_000 })
+    await expect(failure).toBeVisible()
+  } finally {
+    await app.release()
+  }
+})
 
 /** Drive the native window and tray callbacks for this isolated Windows process. */
 async function nativeWindow(action, target) {
@@ -151,6 +249,7 @@ test('desktop confirms close and can restore the same workspace from the Windows
   test.skip(process.platform !== 'win32', 'requires the native Windows tray')
   const app = await launch('', true)
   const { page } = app
+  page.setDefaultTimeout(8_000)
   try {
     const settings = page.getByRole('button', { name: '设置', exact: true })
     await expect(settings).toBeVisible()
@@ -203,7 +302,7 @@ test('desktop moves an existing connection into a new group by drag and drop', a
     await dialog.getByLabel('Connection name', { exact: true }).fill('Other Redis')
     await dialog.getByRole('button', { name: 'Save connection', exact: true }).click()
     await page.getByRole('button', { name: 'Manage connections', exact: true }).click()
-    await page.getByRole('button', { name: 'New group', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'New group', exact: true }).click()
     await dialog.getByLabel('New group', { exact: true }).fill('My caches')
     await dialog.getByRole('button', { name: 'Confirm' }).click()
 
@@ -246,6 +345,7 @@ test('desktop loads 10,000 keys by default and preserves the rest for paging', a
     })
     await page.reload()
     await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    await page.getByRole('button', { name: 'General', exact: true }).click()
     const batchSize = page.getByRole('combobox', { name: 'Keys per batch', exact: true })
     await expect(batchSize).toHaveValue('10000')
     await page.getByRole('button', { name: 'Close settings', exact: true }).click()
@@ -263,10 +363,256 @@ test('desktop loads 10,000 keys by default and preserves the rest for paging', a
     await expect(page.getByRole('button', { name: 'Load more', exact: true })).toHaveCount(0)
 
     await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    await page.getByRole('button', { name: 'General', exact: true }).click()
     await batchSize.selectOption('400')
     await page.reload()
     await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    await page.getByRole('button', { name: 'General', exact: true }).click()
     await expect(batchSize).toHaveValue('400')
+  } finally {
+    await app.release()
+  }
+})
+
+/** Open the same four-tab workspace used by the keyboard regression tests. */
+async function keyboardWorkspace(page, width = 640) {
+  await english(page)
+  await page.setViewportSize({ width, height: 600 })
+  await connect(page, 'Tab keyboard fixture')
+  await page.getByTitle('Open CLI', { exact: true }).click()
+  await databaseTool(page, 'Redis Search')
+  const tabs = {
+    all: page.getByRole('tab'),
+    workspace: page.getByRole('tab', { name: 'Workspace', exact: true }),
+    server: page.getByRole('tab', { name: 'Tab keyboard fixture', exact: true }),
+    cli: page.getByRole('tab', { name: 'CLI · Tab keyboard fixture', exact: true }),
+    search: page.getByRole('tab', { name: 'Redis Search', exact: true }),
+  }
+  await expect(tabs.all).toHaveCount(4)
+  return tabs
+}
+
+/** Assert both the selected tab and the roving keyboard target. */
+async function expectActiveTab(page, tab) {
+  await expect(tab).toHaveAttribute('aria-selected', 'true')
+  await expect(tab).toBeFocused()
+  await expect(tab).toHaveAttribute('tabindex', '0')
+  for (const inactive of await page.getByRole('tab', { selected: false }).all()) {
+    await expect(inactive).toHaveAttribute('tabindex', '-1')
+  }
+}
+
+/** Assert the whole tab, rather than a partially clipped edge, is inside the strip. */
+async function expectTabFullyVisible(tab) {
+  await expect.poll(() => tab.evaluate(element => {
+    const button = element.getBoundingClientRect()
+    const strip = element.closest('.tabs').getBoundingClientRect()
+    return button.left >= strip.left && button.right <= strip.right
+  })).toBe(true)
+}
+
+/** Verify wrapping in both directions, Home/End, roving focus, and resize scrolling. */
+test('desktop tab keyboard navigation wraps both ends and keeps the active tab visible after resize', async () => {
+  test.skip(!addr || process.env.REDIS_TEST_ISOLATED !== '1' || process.platform !== 'win32', 'requires an isolated Redis instance')
+  const app = await launch()
+  const { page } = app
+  try {
+    const tabs = await keyboardWorkspace(page)
+
+    await tabs.search.focus()
+    await tabs.search.press('ArrowRight')
+    await expectActiveTab(page, tabs.workspace)
+    await expectTabFullyVisible(tabs.workspace)
+    await tabs.workspace.press('ArrowLeft')
+    await expectActiveTab(page, tabs.search)
+    await expectTabFullyVisible(tabs.search)
+    await tabs.search.press('Home')
+    await expectActiveTab(page, tabs.workspace)
+    await tabs.workspace.press('End')
+    await expectActiveTab(page, tabs.search)
+    await expectTabFullyVisible(tabs.search)
+    await tabs.search.press('ArrowLeft')
+    await expectActiveTab(page, tabs.cli)
+    await tabs.cli.press('ArrowRight')
+    await expectActiveTab(page, tabs.search)
+
+    await page.setViewportSize({ width: 1100, height: 600 })
+    await expectTabFullyVisible(tabs.search)
+    await page.locator('.tabs').evaluate(element => { element.scrollLeft = 0 })
+    await page.setViewportSize({ width: 480, height: 600 })
+    await expectTabFullyVisible(tabs.search)
+    await expectActiveTab(page, tabs.search)
+
+    const height = await page.locator('.tabs').evaluate(element => element.getBoundingClientRect().height)
+    expect(height).toBe(38)
+  } finally {
+    await app.release()
+  }
+})
+
+/** Verify every active-close entry point asks App for the same surviving focus target. */
+test('desktop tab keyboard close paths restore focus for button Ctrl+W context menu and app actions', async () => {
+  test.skip(!addr || process.env.REDIS_TEST_ISOLATED !== '1' || process.platform !== 'win32', 'requires an isolated Redis instance')
+  const app = await launch()
+  const { page } = app
+  const key = 'redispal-tab-focus-' + Date.now()
+  try {
+    const tabs = await keyboardWorkspace(page, 1100)
+
+    await tabs.cli.click()
+    await page.locator('.tab-shell').filter({ has: tabs.cli }).getByRole('button', { name: 'Close tab', exact: true }).click()
+    await expect(tabs.cli).toHaveCount(0)
+    await expectActiveTab(page, tabs.server)
+
+    await tabs.search.click()
+    await page.keyboard.press('Control+w')
+    await expect(tabs.search).toHaveCount(0)
+    await expectActiveTab(page, tabs.server)
+
+    await tabs.server.click({ button: 'right' })
+    await page.locator('.context-menu').getByRole('menuitem', { name: 'Close tab', exact: true }).click()
+    await expect(tabs.server).toHaveCount(0)
+    await expectActiveTab(page, tabs.workspace)
+
+    await page.keyboard.press('Control+f')
+    await expect(page.getByLabel('Search keys', { exact: true })).toBeFocused()
+    await page.getByRole('button', { name: 'New key', exact: true }).click()
+    await page.getByLabel('Key name', { exact: true }).fill(key)
+    await page.getByRole('textbox', { name: 'Value', exact: true }).fill('tab focus fixture')
+    await page.getByRole('button', { name: 'Create key', exact: true }).click()
+    const keyTab = page.getByRole('tab', { name: key, exact: true })
+    await expect(keyTab).toBeVisible()
+    await page.getByRole('button', { name: 'Delete key', exact: true }).click()
+    await page.getByRole('dialog').getByRole('button', { name: 'Confirm', exact: true }).click()
+    await expect(keyTab).toHaveCount(0)
+    await expectActiveTab(page, tabs.workspace)
+  } finally {
+    await app.release()
+    await cleanup(addr, password, key)
+  }
+})
+
+test('desktop protects a draft before closing a tab, disconnecting or quitting', async () => {
+  test.skip(!addr || process.env.REDIS_TEST_ISOLATED !== '1' || process.platform !== 'win32', 'requires an isolated Redis instance')
+  const app = await launch('', true)
+  const { page } = app
+  try {
+    await english(page)
+    await connect(page, 'Draft connection')
+    await page.getByRole('button', { name: 'New key', exact: true }).click()
+    const name = page.getByLabel('Key name', { exact: true })
+    await name.fill('unsaved-draft')
+    const draft = page.getByRole('tab', { name: /unsaved changes/i })
+    await expect(draft).toBeVisible()
+    const confirm = page.getByRole('dialog', { name: 'Discard unsaved changes?' })
+    await draft.press('Control+w')
+    await confirm.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(name).toHaveValue('unsaved-draft')
+    await expect(draft).toBeFocused()
+
+    await page.getByRole('button', { name: 'Connection actions', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Disconnect', exact: true }).click()
+    await confirm.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(name).toHaveValue('unsaved-draft')
+    await expect(page.getByLabel('Database', { exact: true })).toBeVisible()
+
+    const window = await nativeWindow('main', app.process.pid)
+    await nativeWindow('close', window)
+    const close = page.getByRole('dialog', { name: 'Close RedisPal', exact: true })
+    await close.getByRole('button', { name: 'Quit the app', exact: true }).click()
+    await confirm.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await close.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(name).toHaveValue('unsaved-draft')
+
+    await draft.press('Control+w')
+    await confirm.getByRole('button', { name: 'Discard changes', exact: true }).click()
+    await expect(draft).toHaveCount(0)
+    await expect(page.getByRole('tab', { name: 'Draft connection', exact: true })).toBeFocused()
+  } finally {
+    await app.release()
+  }
+})
+
+test('desktop preserves edited values during a failed refresh and disables writes until retry', async () => {
+  test.skip(!addr || process.env.REDIS_TEST_ISOLATED !== '1' || process.platform !== 'win32', 'requires an isolated Redis instance')
+  const upstream = new URL('redis://' + addr)
+  const sockets = new Set()
+  let available = true
+  const proxy = createServer(client => {
+    if (!available) return client.destroy()
+    const redis = createConnection({ host: upstream.hostname, port: Number(upstream.port) })
+    for (const socket of [client, redis]) {
+      sockets.add(socket)
+      socket.on('error', () => socket.destroy())
+      socket.on('close', () => {
+        sockets.delete(socket)
+        client.destroy()
+        redis.destroy()
+      })
+    }
+    client.pipe(redis).pipe(client)
+  })
+  await new Promise((resolve, reject) => proxy.listen(0, '127.0.0.1', resolve).once('error', reject))
+  const key = 'redispal-stale-' + Date.now()
+  let app
+  try {
+    app = await launch()
+    const { page } = app
+    await english(page)
+    await connect(page, 'Refresh fixture', false, `127.0.0.1:${proxy.address().port}`, password)
+    await page.getByRole('button', { name: 'New key', exact: true }).click()
+    await page.getByLabel('Key name', { exact: true }).fill(key)
+    const editor = page.getByRole('textbox', { name: 'Value', exact: true })
+    await editor.fill('saved value')
+    await page.getByRole('button', { name: 'Create key', exact: true }).click()
+    await expect(page.getByRole('heading', { name: key, exact: true })).toBeVisible()
+    await expect(editor).toBeEditable()
+    await editor.fill('draft value')
+
+    available = false
+    for (const socket of sockets) socket.destroy()
+    await page.getByRole('button', { name: 'Refresh key', exact: true }).click()
+    const stale = page.getByText('Data may be stale', { exact: true })
+    await expect(stale).toBeVisible({ timeout: 24_000 })
+    await expect(editor).toHaveValue('draft value')
+    const save = page.getByRole('button', { name: 'Save value', exact: true })
+    await expect(save).toBeDisabled()
+
+    available = true
+    await page.getByRole('button', { name: 'Retry', exact: true }).click()
+    await expect(stale).toHaveCount(0)
+    await expect(save).toBeEnabled()
+    await expect(editor).toHaveValue('draft value')
+    await save.click()
+    await expect(page.locator('.toast').getByText('Saved', { exact: true })).toBeVisible()
+    await expect(page.getByRole('tab', { name: key, exact: true })).toBeVisible()
+  } finally {
+    if (app) await app.release()
+    for (const socket of sockets) socket.destroy()
+    await new Promise(resolve => proxy.close(resolve))
+    await cleanup(addr, password, key)
+  }
+})
+
+/** Closing a non-selected middle tab moves focus without changing the active workspace. */
+test('desktop tab keyboard inactive middle close focuses its neighbour without changing selection', async () => {
+  test.skip(!addr || process.env.REDIS_TEST_ISOLATED !== '1' || process.platform !== 'win32', 'requires an isolated Redis instance')
+  const app = await launch()
+  const { page } = app
+  try {
+    const tabs = await keyboardWorkspace(page)
+    await tabs.search.click()
+    await expectActiveTab(page, tabs.search)
+
+    await tabs.server.click({ button: 'right' })
+    await page.locator('.context-menu').getByRole('menuitem', { name: 'Close tab', exact: true }).click()
+    await expect(tabs.server).toHaveCount(0)
+    await expect(tabs.workspace).toBeFocused()
+    await expect(tabs.workspace).toHaveAttribute('tabindex', '0')
+    await expect(tabs.search).toHaveAttribute('aria-selected', 'true')
+    await expect(tabs.search).toHaveAttribute('tabindex', '-1')
+    await expect(page.getByRole('tab', { selected: true })).toHaveCount(1)
+    await expectTabFullyVisible(tabs.search)
   } finally {
     await app.release()
   }
@@ -377,6 +723,7 @@ test('desktop refreshes stream entries and manages consumer groups', async ({}, 
     await cli(page, 'XREADGROUP GROUP workers worker-a COUNT 1 STREAMS ' + key + ' >')
     await expect(page.getByRole('log')).toContainText('first-message')
     await streamTab.click()
+    await page.getByRole('tab', { name: 'Pending', exact: true }).click()
     await page.getByRole('button', { name: 'Refresh consumer groups' }).click()
     const pending = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Acknowledge', exact: true }) })
     await expect(pending).toContainText('worker-a')
@@ -387,7 +734,8 @@ test('desktop refreshes stream entries and manages consumer groups', async ({}, 
     await page.screenshot({ path: info.outputPath('stream-consumer-groups.png') })
     await pending.getByRole('button', { name: 'Acknowledge' }).click()
     await expect(page.getByText('No pending entries', { exact: true })).toBeVisible()
-    await page.getByRole('button', { name: 'Delete group', exact: true }).click()
+    await page.getByRole('tab', { name: 'Groups', exact: true }).click()
+    await page.getByRole('button', { name: 'Delete group workers', exact: true }).click()
     await dialog.getByRole('button', { name: 'Confirm', exact: true }).click()
     await expect(page.getByRole('button', { name: 'workers', exact: true })).toHaveCount(0)
   } finally {
@@ -483,13 +831,70 @@ test('desktop finds a new release automatically and offers its download page', a
     await expect.poll(() => checks).toBe(2)
     await expect(status).toHaveCount(0)
     await page.getByRole('button', { name: '设置', exact: true }).click()
+    await page.getByRole('button', { name: '更新', exact: true }).click()
     await expect(page.getByRole('dialog')).toContainText('当前版本 v' + version)
-    await page.getByRole('button', { name: '检查更新', exact: true }).click()
+    await page.getByRole('dialog').getByRole('button', { name: '检查更新', exact: true }).click()
     await expect(status).toContainText(latest)
     await expect(page.getByRole('dialog')).toHaveCount(0)
   } finally {
     if (app) await app.release()
     await new Promise(resolve => server.close(resolve))
+  }
+})
+
+/** Restore focus to the control that opened Settings after Escape closes it. */
+test('desktop dialog focus returns to Settings after Escape', async () => {
+  test.skip(process.platform !== 'win32', 'requires the native Windows build')
+  const app = await launch()
+  const { page } = app
+  try {
+    await english(page)
+    const settings = page.getByRole('button', { name: 'Settings', exact: true })
+    await settings.click()
+    const dialog = page.getByRole('dialog', { name: 'Settings', exact: true })
+    await expect(dialog).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeHidden()
+    await expect(settings).toBeFocused()
+  } finally {
+    await app.release()
+  }
+})
+
+/** Keep keyboard navigation inside the open Settings modal in both directions. */
+test('desktop dialog focus stays inside Settings while tabbing', async () => {
+  test.skip(process.platform !== 'win32', 'requires the native Windows build')
+  const app = await launch()
+  const { page } = app
+  try {
+    await english(page)
+    await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    const frame = page.locator('.modal-frame')
+    await expect(frame).toBeVisible()
+    for (let index = 0; index < 12; index++) {
+      await page.keyboard.press('Tab')
+      expect(await frame.evaluate(element => element.contains(document.activeElement))).toBe(true)
+    }
+  } finally {
+    await app.release()
+  }
+})
+
+/** Connect the modal's accessible name to its visible Settings heading. */
+test('desktop dialog focus exposes Settings through aria-labelledby', async () => {
+  test.skip(process.platform !== 'win32', 'requires the native Windows build')
+  const app = await launch()
+  const { page } = app
+  try {
+    await english(page)
+    await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    const frame = page.locator('.modal-frame')
+    await expect(frame).toHaveAttribute('role', 'document')
+    const titleId = await frame.getAttribute('aria-labelledby')
+    expect(titleId).toBeTruthy()
+    await expect(page.locator('#' + titleId)).toHaveText('Settings')
+  } finally {
+    await app.release()
   }
 })
 
@@ -553,7 +958,7 @@ test('desktop applies and saves its built-in themes with readable primary action
       await expect(root).toHaveAttribute('data-theme', colorScheme)
     }
     await settings.click()
-    await dialog.getByText('Naive UI', { exact: true }).click()
+    await dialog.locator('.preset-option').getByText('Naive UI', { exact: true }).click()
     await mode.selectOption('dark')
     await close.click()
     await expect(primary).toHaveCSS('background-color', 'rgb(99, 226, 183)')
@@ -578,6 +983,7 @@ test('desktop app creates, edits, searches, backs up, restores and deletes Redis
     await page.screenshot({ path: info.outputPath('startup-logo.png') })
     await expect(page.getByRole('button', { name: '新建连接', exact: true }).first()).toBeVisible()
     await page.getByRole('button', { name: '设置', exact: true }).click()
+    await page.getByRole('button', { name: '常规', exact: true }).click()
     const language = page.getByRole('combobox', { name: '语言', exact: true })
     await expect(language).toHaveValue('zh')
     await expect(language.getByRole('option')).toHaveText(['简体中文', 'English'])
@@ -593,13 +999,13 @@ test('desktop app creates, edits, searches, backs up, restores and deletes Redis
     await page.reload()
     await expect(page.getByRole('button', { name: 'Existing Redis profile', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'New connection', exact: true }).first()).toBeVisible()
-    await expect(page.getByRole('status')).toHaveCount(0)
+    await expect(page.locator('.toast')).toHaveCount(0)
     await connect(page, 'Wails Redis E2E')
     await page.screenshot({ path: info.outputPath('connection-success.png') })
     await page.getByRole('button', { name: 'Dismiss notification', exact: true }).click()
-    await expect(page.getByRole('status')).toHaveCount(0)
+    await expect(page.locator('.toast')).toHaveCount(0)
     await expect(page.getByRole('heading', { name: 'Wails Redis E2E' })).toBeVisible()
-    await expect(page.getByText('Redis version')).toBeVisible()
+    await expect(page.getByText('redis_version', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'New key', exact: true }).click()
     await page.getByLabel('Key name', { exact: true }).fill(key)
     await page.getByRole('textbox', { name: 'Value', exact: true }).fill('original value')
@@ -609,10 +1015,10 @@ test('desktop app creates, edits, searches, backs up, restores and deletes Redis
 
     await page.getByRole('textbox', { name: 'Value', exact: true }).fill('updated value')
     await page.getByRole('button', { name: 'Save value' }).click()
-    await expect(page.getByRole('status')).toContainText('Saved')
+    await expect(page.locator('.toast').getByText('Saved', { exact: true })).toBeVisible()
     await page.getByLabel('TTL', { exact: true }).fill('90')
     await page.getByRole('button', { name: 'Update TTL' }).click()
-    await expect(page.getByRole('status')).toContainText('TTL updated')
+    await expect(page.locator('.toast').getByText('TTL updated', { exact: true })).toBeVisible()
     await page.getByLabel('Search keys', { exact: true }).fill(key)
     await page.getByLabel('Search keys', { exact: true }).press('Enter')
     await expect(page.locator('.keys-toolbar')).toContainText('1 keys')
@@ -642,13 +1048,11 @@ test('desktop app creates, edits, searches, backs up, restores and deletes Redis
     await expect(page.getByRole('log').getByText('updated value', { exact: true })).toBeVisible()
     await cli(page, 'PTTL ' + key)
     await expect(page.getByRole('log').locator('pre').last()).toHaveText(/^\d+$/)
-    await page.getByRole('button', { name: 'Database actions' }).click()
-    await page.getByRole('button', { name: 'Memory analysis', exact: true }).click()
+    await databaseTool(page, 'Memory analysis')
     await page.getByPlaceholder('Key pattern, e.g. session:*').fill(key + '*')
     await page.getByRole('button', { name: 'Analyze', exact: true }).click()
     await expect(page.getByRole('cell', { name: hash, exact: true })).toBeVisible()
-    await page.getByRole('button', { name: 'Database actions' }).click()
-    await page.getByRole('button', { name: 'Command log', exact: true }).click()
+    await databaseTool(page, 'Command log')
     await expect(page.getByRole('cell', { name: 'GET', exact: true }).first()).toBeVisible()
 
     await page.getByRole('tab', { name: key, exact: true }).click()
@@ -664,7 +1068,7 @@ test('desktop app creates, edits, searches, backs up, restores and deletes Redis
     await page.locator('input[accept=".json,.csv"]').setInputFiles(output)
     await page.getByRole('dialog').getByRole('button', { name: 'Confirm' }).click()
     await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
-    await expect(page.getByRole('status')).toContainText('Imported · 1')
+    await expect(page.locator('.toast').getByText('Imported · 1', { exact: false })).toBeVisible()
     await page.getByRole('tab', { name: 'CLI · Wails Redis E2E', exact: true }).click()
     await cli(page, 'DEL ' + key + ' ' + hash)
     await expect(page.getByRole('log').locator('pre').last()).toHaveText('2')
@@ -686,7 +1090,7 @@ test('desktop read-only settings prevent changes from both the browser and CLI',
     await connect(page, 'Read-only Redis', true)
     await expect(page.getByRole('button', { name: 'New key', exact: true })).toBeDisabled()
     await page.getByRole('button', { name: 'Database actions' }).click()
-    await expect(page.getByRole('button', { name: 'Flush database', exact: true })).toBeDisabled()
+    await expect(page.getByRole('menuitem', { name: 'Flush database', exact: true })).toBeDisabled()
     await page.keyboard.press('Escape')
     await page.getByTitle('Open CLI', { exact: true }).click()
     await cli(page, 'SET ' + key + ' rejected')

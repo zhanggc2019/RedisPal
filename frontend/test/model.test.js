@@ -24,6 +24,20 @@ test('adds only new nodes and preserves keys that are also directories', () => {
   assert.deepEqual(treeValues(index.nodes), ['left', 'left:item', 'left:other', 'right:item'])
 })
 
+test('counts loaded descendant keys once, including keys that also have children', () => {
+  const index = createKeyTreeIndex(':')
+  index.append(['068:hash:item', '068:hash', '068'])
+  const [group] = index.nodes
+  const [hash] = group.children
+  assert.equal(group.descendantCount, 2)
+  assert.equal(hash.descendantCount, 1)
+  index.append(['068:hash:item', '068:hash:next', '069:list:item'])
+  assert.equal(group.descendantCount, 3)
+  assert.equal(hash.descendantCount, 2)
+  assert.equal(index.nodes[1].descendantCount, 1)
+  assert.equal(hash.children[0].descendantCount, 0)
+})
+
 test('deduplicates across scan replies and overflow while preserving distinct full keys', async () => {
   const state = scanState()
   const binary = { hex: 'ff' }
@@ -47,6 +61,30 @@ test('deduplicates across scan replies and overflow while preserving distinct fu
   assert.deepEqual(treeValues(state.keyIndex.nodes), expected)
   assert.deepEqual(state.pendingKeys, [])
   assert.equal(state.cursor, '')
+})
+
+test('resumes a stopped scan from the last accepted cursor, including before the first reply', async () => {
+  const state = scanState()
+  for (const expectedCursor of ['', 'next']) {
+    let release
+    let current = true
+    const response = new Promise(resolve => { release = resolve })
+    const keysBeforeStop = state.keys.slice()
+    const stopped = scanKeyBatches(state, Infinity, expectedCursor === '', cursor => {
+      assert.equal(cursor, expectedCursor)
+      return response
+    }, () => current)
+    current = false
+    const resumed = scanKeyBatches(state, 1 + keysBeforeStop.length, false, async cursor => {
+      assert.equal(cursor, expectedCursor)
+      return expectedCursor === '' ? { keys: ['a:first'], cursor: 'next' } : { keys: ['a:first', 'a:second'], cursor: '' }
+    }, () => true)
+    release({ keys: ['a:late'], cursor: 'obsolete' })
+    await Promise.all([stopped, resumed])
+    assert.deepEqual(state.keys, expectedCursor === '' ? ['a:first'] : ['a:first', 'a:second'])
+  }
+  assert.equal(state.cursor, '')
+  assert.deepEqual(treeValues(state.keyIndex.nodes), ['a:first', 'a:second'])
 })
 
 for (const action of ['refresh', 'database switch']) {

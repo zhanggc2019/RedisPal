@@ -14,12 +14,16 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-const releaseRepository = "zhanggc2019/RedisPal"
+const (
+	releaseRepository    = "zhanggc2019/RedisPal"
+	releaseRepositoryURL = "https://github.com/" + releaseRepository
+)
 
 // ReleaseConfiguration describes the current build and whether it follows GitHub Releases.
 type ReleaseConfiguration struct {
-	Version string `json:"version"`
-	GitHub  bool   `json:"github"`
+	Version       string `json:"version"`
+	GitHub        bool   `json:"github"`
+	RepositoryURL string `json:"repositoryUrl"`
 }
 
 // ReleaseUpdate describes a newer stable release and its official download page.
@@ -47,7 +51,11 @@ func newReleaseUpdates(version string) *ReleaseUpdates {
 
 // Configuration returns immediately so Settings can display the version offline.
 func (s *ReleaseUpdates) Configuration() ReleaseConfiguration {
-	return ReleaseConfiguration{Version: s.version, GitHub: !s.signed && s.endpoint != ""}
+	return ReleaseConfiguration{
+		Version:       s.version,
+		GitHub:        !s.signed && s.endpoint != "",
+		RepositoryURL: releaseRepositoryURL,
+	}
 }
 
 // Check finds a newer stable GitHub release and constructs its official release URL.
@@ -93,6 +101,6 @@ func (s *ReleaseUpdates) Check(ctx context.Context) (ReleaseUpdate, error) {
 	}
 	return ReleaseUpdate{
 		Version: release.Tag,
-		URL:     "https://github.com/" + releaseRepository + "/releases/tag/" + url.PathEscape(release.Tag),
+		URL:     releaseRepositoryURL + "/releases/tag/" + url.PathEscape(release.Tag),
 	}, nil
 }
