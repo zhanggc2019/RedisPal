@@ -2,14 +2,14 @@
 
 RedisPal 是一款 Windows Redis 桌面客户端。你可以在侧栏管理连接、按树形浏览键，并在多标签工作区中编辑数据、运行 Redis 命令和查看服务器状态。
 
-[下载 Windows x64 版](https://github.com/zhanggc2019/RedisPal/releases/latest) · [快速上手](#快速上手) · [版本区别](#版本区别) · [从源码构建](#从源码构建)
+[下载 Windows x64 版](https://github.com/zhanggc2019/RedisPal/releases/latest) · [快速上手](#快速上手) · [提交记录](https://github.com/zhanggc2019/RedisPal/commits/main/) · [从源码构建](#从源码构建)
 
 ## 下载与安装
 
 | 发行形式 | 下载文件 | 安装与使用 |
 | --- | --- | --- |
 | 免安装版 | [RedisPal-windows-x64.exe](https://github.com/zhanggc2019/RedisPal/releases/latest/download/RedisPal-windows-x64.exe) | 直接运行 EXE，适合试用或手动管理程序位置。运行需要 Microsoft Edge WebView2 Runtime。 |
-| 安装版 | [RedisPal-windows-x64-setup.exe](https://github.com/zhanggc2019/RedisPal/releases/latest/download/RedisPal-windows-x64-setup.exe) | 安装程序会检查并按需安装 WebView2 Runtime，默认目录为 `%LOCALAPPDATA%\Programs\RedisPal`，并提供开始菜单快捷方式和卸载入口。安装完成页默认勾选「创建桌面快捷方式」，可按需取消。 |
+| 安装版 | [RedisPal-windows-x64-setup.exe](https://github.com/zhanggc2019/RedisPal/releases/latest/download/RedisPal-windows-x64-setup.exe) | 安装程序会检查并按需安装 WebView2 Runtime，默认目录为 `%LOCALAPPDATA%\Programs\RedisPal`，并提供开始菜单快捷方式和卸载入口。 |
 
 两种发行形式使用同一个应用程序。连接和界面设置存放在 Windows 用户配置目录，覆盖升级后可以继续使用。每个 [GitHub Release](https://github.com/zhanggc2019/RedisPal/releases) 提供对应的下载文件，近期版本还提供 `SHA256SUMS` 和签名更新清单。
 
@@ -34,24 +34,13 @@ RedisPal 是一款 Windows Redis 桌面客户端。你可以在侧栏管理连�
 
 Redis Search 提供索引浏览和创建、字段补全、查询收藏、Explain 和 Profile，需要服务端支持 `FT.*`。Pub/Sub 支持普通、模式和分片订阅。实时监控支持筛选和导出，Cluster 下观察一个主节点。慢日志支持自动刷新，修改阈值和日志长度需要相应 ACL 权限。内存分析会分批显示扫描批次、匹配键数和已测量键数。
 
-## 版本区别
-
-| 版本 | 主要改动 |
-| --- | --- |
-| [v0.1.1](https://github.com/zhanggc2019/RedisPal/releases/tag/v0.1.1) | 新增「帮助」与「关于 RedisPal」，将更新入口移至「帮助」，界面字体改为下拉选择，简化首页并微调 Logo 圆角。 |
-| [v0.1.0](https://github.com/zhanggc2019/RedisPal/releases/tag/v0.1.0) | 设置切换分类时保持窗口位置和尺寸。优化窄窗口和高缩放下的键浏览，更新与连接反馈就近显示。 |
-| [v0.0.9](https://github.com/zhanggc2019/RedisPal/releases/tag/v0.0.9) | 新增 Element Plus、Layui 和 Ant Design 三种配色。 |
-| [v0.0.8](https://github.com/zhanggc2019/RedisPal/releases/tag/v0.0.8) | 正式 Windows 版支持在应用内下载、验证并安装签名更新。 |
-| [v0.0.7](https://github.com/zhanggc2019/RedisPal/releases/tag/v0.0.7) | 更新桌面工作区、键编辑器和工具面板，构建工具链升级至 Go 1.27。 |
-| [v0.0.6](https://github.com/zhanggc2019/RedisPal/releases/tag/v0.0.6) | 键列表支持增量加载和去重，便于浏览较大的数据库。 |
-
-### 检查更新
+## 检查更新
 
 RedisPal 启动时和运行期间每六小时检查更新，也可在「帮助 → 检查更新」手动检查。签名版点击「安装更新」后会下载并验签，然后可选择「立即重启」或「稍后」。选择「稍后」后，可在本次运行中再次打开更新窗口继续操作。
 
 从 v0.0.7 或更早版本升级时，先到 [GitHub Releases](https://github.com/zhanggc2019/RedisPal/releases/latest) 下载并覆盖升级一次，即可使用后续签名版本的应用内更新功能。
 
-v0.1.1 的中英文说明已补充到 [GitHub Releases](https://github.com/zhanggc2019/RedisPal/releases/tag/v0.1.1)。支持应用内日志的版本还可在「帮助 → 检查更新」预览新版说明，或在「关于 RedisPal」离线查看当前版本随附的说明。
+支持应用内更新日志的版本可以在「帮助 → 检查更新」预览新版说明，或在「关于 RedisPal」离线查看当前版本说明。
 
 ## 从源码构建
 
