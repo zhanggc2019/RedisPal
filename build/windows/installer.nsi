@@ -30,6 +30,10 @@ VIAddVersionKey "LegalCopyright" "RedisPal contributors"
 !define MUI_UNICON "RedisPal.ico"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\RedisPal.exe"
 !define MUI_FINISHPAGE_RUN_NOTCHECKED
+; Use the second optional action on the finish page for the desktop shortcut.
+!define MUI_FINISHPAGE_SHOWREADME ""
+!define MUI_FINISHPAGE_SHOWREADME_TEXT "$(CreateDesktopShortcutText)"
+!define MUI_FINISHPAGE_SHOWREADME_FUNCTION CreateDesktopShortcut
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
@@ -48,6 +52,10 @@ LangString RuntimeFailed ${LANG_SIMPCHINESE} "未能安装 WebView2 Runtime。�
 LangString RuntimeFailed ${LANG_ENGLISH} "WebView2 Runtime could not be installed. Connect to the internet and run setup again."
 LangString InstallFailed ${LANG_SIMPCHINESE} "无法写入安装文件。请关闭 RedisPal，并确认安装目录可写后重试。"
 LangString InstallFailed ${LANG_ENGLISH} "Could not write the installation files. Close RedisPal and check that the installation folder is writable."
+LangString CreateDesktopShortcutText ${LANG_SIMPCHINESE} "创建桌面快捷方式"
+LangString CreateDesktopShortcutText ${LANG_ENGLISH} "Create a desktop shortcut"
+LangString DesktopShortcutFailed ${LANG_SIMPCHINESE} "无法创建桌面快捷方式。你可以从开始菜单打开 RedisPal。"
+LangString DesktopShortcutFailed ${LANG_ENGLISH} "Could not create the desktop shortcut. You can open RedisPal from the Start menu."
 LangString UninstallFailed ${LANG_SIMPCHINESE} "无法移除 RedisPal。请关闭程序后重新卸载。"
 LangString UninstallFailed ${LANG_ENGLISH} "Could not remove RedisPal. Close the app and try uninstalling again."
 
@@ -96,6 +104,17 @@ Function EnsureWebView2
   ${EndIf}
 FunctionEnd
 
+; Create the selected shortcut and record which installation owns it.
+Function CreateDesktopShortcut
+  ClearErrors
+  CreateShortCut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\RedisPal.exe"
+  ${If} ${Errors}
+    MessageBox MB_ICONEXCLAMATION|MB_OK "$(DesktopShortcutFailed)"
+    Return
+  ${EndIf}
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "DesktopShortcutInstallLocation" "$INSTDIR"
+FunctionEnd
+
 Section "RedisPal"
   Call EnsureWebView2
   ClearErrors
@@ -139,6 +158,10 @@ Section "Uninstall"
   ReadRegStr $0 HKCU "${UNINSTALL_KEY}" "InstallLocation"
   ${If} $0 == $INSTDIR
     Delete "$SMPROGRAMS\${APP_NAME}.lnk"
+    ReadRegStr $0 HKCU "${UNINSTALL_KEY}" "DesktopShortcutInstallLocation"
+    ${If} $0 == $INSTDIR
+      Delete "$DESKTOP\${APP_NAME}.lnk"
+    ${EndIf}
     DeleteRegKey HKCU "${UNINSTALL_KEY}"
   ${EndIf}
   Delete "$INSTDIR\Uninstall.exe"

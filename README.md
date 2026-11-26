@@ -9,7 +9,7 @@ RedisPal 是一款 Windows Redis 桌面客户端。你可以在侧栏管理连�
 | 发行形式 | 下载文件 | 安装与使用 |
 | --- | --- | --- |
 | 免安装版 | [RedisPal-windows-x64.exe](https://github.com/zhanggc2019/RedisPal/releases/latest/download/RedisPal-windows-x64.exe) | 直接运行 EXE，适合试用或手动管理程序位置。运行需要 Microsoft Edge WebView2 Runtime。 |
-| 安装版 | [RedisPal-windows-x64-setup.exe](https://github.com/zhanggc2019/RedisPal/releases/latest/download/RedisPal-windows-x64-setup.exe) | 安装程序会检查并按需安装 WebView2 Runtime，默认目录为 `%LOCALAPPDATA%\Programs\RedisPal`，并提供开始菜单快捷方式和卸载入口。 |
+| 安装版 | [RedisPal-windows-x64-setup.exe](https://github.com/zhanggc2019/RedisPal/releases/latest/download/RedisPal-windows-x64-setup.exe) | 安装程序会检查并按需安装 WebView2 Runtime，默认目录为 `%LOCALAPPDATA%\Programs\RedisPal`，并提供开始菜单快捷方式和卸载入口。安装完成页默认勾选「创建桌面快捷方式」，可按需取消。 |
 
 两种发行形式使用同一个应用程序。连接和界面设置存放在 Windows 用户配置目录，覆盖升级后可以继续使用。每个 [GitHub Release](https://github.com/zhanggc2019/RedisPal/releases) 提供对应的下载文件，近期版本还提供 `SHA256SUMS` 和签名更新清单。
 
