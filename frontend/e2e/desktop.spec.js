@@ -196,20 +196,21 @@ test('desktop workbench, settings and connection form fit supported widths and s
       await close.click()
       await expect(settings).toBeFocused()
       const home = page.getByRole('tabpanel', { name: 'Workspace', exact: true })
-      await expect(home.getByRole('button', { name: 'New connection', exact: true })).toBeInViewport()
+      const newConnection = home.getByRole('button', { name: 'New connection', exact: true })
+      await expect(newConnection).toBeInViewport()
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
       await expect(page.locator('.app')).toHaveAttribute('data-theme', theme === 'light' ? 'light' : 'dark')
       await page.screenshot({ path: info.outputPath(`${width}-${scale}-workbench.png`) })
       await expect(page.getByRole('button', { name: /^$/ })).toHaveCount(0)
 
-      await home.getByRole('button', { name: 'New connection', exact: true }).click()
+      await newConnection.press('Enter')
       const connection = page.getByRole('dialog', { name: 'New connection', exact: true })
       await expect(connection).toBeInViewport({ ratio: 1 })
       await expect(connection.getByRole('button', { name: 'Save connection', exact: true })).toBeInViewport({ ratio: 1 })
       await expect(connection.getByRole('button', { name: /^$/ })).toHaveCount(0)
       await page.screenshot({ path: info.outputPath(`${width}-${scale}-connection.png`) })
       await page.keyboard.press('Escape')
-      await expect(home.getByRole('button', { name: 'New connection', exact: true })).toBeFocused()
+      await expect(newConnection).toBeFocused()
     }
     await cdp.detach()
   } finally {
@@ -847,7 +848,95 @@ test('desktop creates and queries a Redis Search index', async ({}, info) => {
   }
 })
 
-/** Exercise startup polling and keep manual results beside the version in Settings. */
+/** Confirm font choices apply immediately and restore existing preferences. */
+test('desktop selects interface fonts and retains an existing font', async () => {
+  test.skip(process.platform !== 'win32', 'requires the native Windows build')
+  const app = await launch()
+  const { page } = app
+  try {
+    const settings = page.getByRole('button', { name: '设置', exact: true })
+    const font = page.getByRole('combobox', { name: '界面字体', exact: true })
+    await settings.click()
+    await expect(font).toHaveValue('')
+    await font.selectOption('Arial')
+    await expect(page.locator('.app')).toHaveCSS('font-family', 'Arial')
+    await page.reload()
+    await settings.click()
+    await expect(font).toHaveValue('Arial')
+    await page.evaluate(() => {
+      const workspace = JSON.parse(localStorage.getItem('ardm-workspace-v1'))
+      workspace.settings.font = 'Tahoma'
+      localStorage.setItem('ardm-workspace-v1', JSON.stringify(workspace))
+    })
+    await page.reload()
+    await settings.click()
+    await expect(font).toHaveValue('Tahoma')
+    await font.selectOption('')
+    await expect(font).toHaveValue('')
+    await expect(page.locator('.app')).toHaveCSS('font-family', /Segoe UI/)
+  } finally {
+    await app.release()
+  }
+})
+
+/** Open Help by keyboard and verify the guide, shortcuts and version information. */
+test('desktop groups help, shortcuts and About under the Help menu', async ({}, info) => {
+  test.skip(process.platform !== 'win32', 'requires the native Windows build')
+  const app = await launch()
+  const { page } = app
+  try {
+    const help = page.getByRole('button', { name: '帮助', exact: true })
+    const menu = page.getByRole('menu', { name: '帮助', exact: true })
+    await help.press('Enter')
+    await expect(menu.getByRole('menuitem')).toHaveText(['使用帮助', '快捷键', '检查更新', '关于 RedisPal'])
+    await expect(menu.getByRole('menuitem', { name: '使用帮助' })).toBeFocused()
+    await page.screenshot({ path: info.outputPath('help-menu.png') })
+    await page.keyboard.press('Enter')
+    const guide = page.getByRole('dialog', { name: '使用帮助', exact: true })
+    await expect(guide.getByRole('heading', { name: '连接 Redis' })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(help).toBeFocused()
+
+    await help.click()
+    await menu.getByRole('menuitem', { name: '快捷键', exact: true }).click()
+    await expect(page.getByRole('dialog', { name: '快捷键', exact: true })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(help).toBeFocused()
+
+    await help.click()
+    await page.keyboard.press('End')
+    await page.keyboard.press('Enter')
+    const about = page.getByRole('dialog', { name: '关于 RedisPal', exact: true })
+    await expect(about).toContainText('v' + (process.env.ARDM_TEST_APP_VERSION || '0.0.1'))
+    await expect(about.getByRole('link', { name: 'GitHub 仓库' })).toBeVisible()
+    await page.screenshot({ path: info.outputPath('about.png') })
+    await page.keyboard.press('Escape')
+    await expect(help).toBeFocused()
+
+    await page.getByRole('button', { name: '设置', exact: true }).click()
+    const settings = page.getByRole('dialog', { name: '设置', exact: true })
+    await expect(settings.getByRole('navigation').getByRole('button')).toHaveText(['外观', '常规'])
+    await page.setViewportSize({ width: 860, height: 520 })
+    await settings.getByRole('combobox', { name: '界面缩放', exact: true }).selectOption('150')
+    await page.keyboard.press('Escape')
+    await english(page)
+    await expect(page.getByRole('tabpanel', { name: 'Workspace', exact: true }).getByRole('button', { name: 'Check for updates' })).toHaveCount(0)
+    const compactHelp = page.getByRole('button', { name: 'Help', exact: true })
+    const compactMenu = page.getByRole('menu', { name: 'Help', exact: true })
+    await compactHelp.click()
+    await expect(compactMenu).toBeInViewport({ ratio: 1 })
+    const menuBounds = await compactMenu.boundingBox()
+    const buttonBounds = await compactHelp.boundingBox()
+    expect(menuBounds.y + menuBounds.height).toBeLessThanOrEqual(buttonBounds.y)
+    await compactMenu.getByRole('menuitem', { name: 'User guide', exact: true }).click()
+    await expect(page.getByRole('dialog', { name: 'User guide', exact: true })).toBeInViewport({ ratio: 1 })
+    await page.screenshot({ path: info.outputPath('help-guide-compact.png') })
+  } finally {
+    await app.release()
+  }
+})
+
+/** Exercise startup polling and keep manual results in Help's updater. */
 test('desktop finds a new release automatically and offers its download page', async ({}, info) => {
   test.skip(process.platform !== 'win32', 'requires the native Windows build')
   const version = process.env.ARDM_TEST_APP_VERSION || '0.0.1'
@@ -855,31 +944,58 @@ test('desktop finds a new release automatically and offers its download page', a
   let checks = 0
   let tag = latest
   let responseCode = 200
+  let holdNextCheck = false
+  let finishStartupCheck
   const server = createHTTPServer((_request, response) => {
     checks++
-    response.statusCode = responseCode
-    response.setHeader('Content-Type', 'application/json')
-    response.end(JSON.stringify({ tag_name: tag }))
+    /** Return the fixture's latest version or the selected HTTP error. */
+    function respond() {
+      finishStartupCheck = null
+      response.statusCode = responseCode
+      response.setHeader('Content-Type', 'application/json')
+      response.end(JSON.stringify({ tag_name: tag }))
+    }
+    if (holdNextCheck) {
+      holdNextCheck = false
+      finishStartupCheck = respond
+    } else respond()
   })
   await new Promise((resolve, reject) => server.listen(0, '127.0.0.1', resolve).once('error', reject))
   let app
   try {
     app = await launch('http://127.0.0.1:' + server.address().port)
     const { page } = app
-    const status = page.locator('.update-banner').getByRole('status')
-    await expect(status).toContainText('发现新版本')
-    await expect(status).toContainText('v' + version + ' → ' + latest)
-    await expect(page.getByRole('button', { name: '查看并下载' })).toBeVisible()
-    await page.getByRole('button', { name: '关闭更新提示' }).click()
-    await expect(status).toHaveCount(0)
-    await page.reload()
-    await expect.poll(() => checks).toBe(2)
-    await expect(status).toHaveCount(0)
-    await page.getByRole('button', { name: '设置', exact: true }).click()
-    await page.getByRole('button', { name: '更新', exact: true }).click()
-    const dialog = page.getByRole('dialog', { name: '设置', exact: true })
+    const help = page.getByRole('button', { name: '帮助', exact: true })
+    const dialog = page.getByRole('dialog', { name: '检查更新', exact: true })
     const check = dialog.getByRole('button', { name: '检查更新', exact: true })
+    const home = page.getByRole('tabpanel', { name: '工作台', exact: true })
+    /** Open the update dialog by its sole manual entry point. */
+    async function openUpdater() {
+      await help.click()
+      await page.getByRole('menuitem', { name: '检查更新', exact: true }).click()
+    }
+
+    await expect(help).toHaveAttribute('aria-description', '发现新版本')
+    await expect(home).not.toContainText('v' + version)
+    await expect(page.locator('.workbench')).not.toContainText('发现新版本')
+    await expect(home.getByRole('button', { name: '检查更新', exact: true })).toHaveCount(0)
+    await openUpdater()
+    await expect(dialog.getByRole('status')).toContainText(latest)
+    await expect(dialog.getByRole('button', { name: '查看并下载' })).toBeVisible()
+    await dialog.getByRole('button', { name: '忽略此版本', exact: true }).click()
+    await expect(help).not.toHaveAttribute('aria-description', '发现新版本')
+    await dialog.getByRole('button', { name: '关闭', exact: true }).click()
+
+    const checksBeforeReload = checks
+    holdNextCheck = true
+    await page.reload()
+    await expect.poll(() => checks).toBe(checksBeforeReload + 1)
+    await openUpdater()
     await expect(dialog).toContainText('当前版本 v' + version)
+    await expect(dialog.getByRole('button', { name: '正在检查…', exact: true })).toBeDisabled()
+    finishStartupCheck()
+    await expect(dialog.getByRole('status')).toContainText(latest)
+    expect(checks).toBe(checksBeforeReload + 1)
     tag = 'v' + version
     await check.click()
     await expect(dialog.getByRole('status')).toContainText('当前已是最新版本')
@@ -892,11 +1008,12 @@ test('desktop finds a new release automatically and offers its download page', a
     await expect(dialog.getByRole('status')).toContainText(latest)
     await expect(dialog.getByRole('button', { name: '查看并下载' })).toBeVisible()
     await expect(dialog.getByRole('alert')).toHaveCount(0)
-    await expect(status).toHaveCount(0)
-    await page.screenshot({ path: info.outputPath('settings-update.png') })
+    await expect(page.locator('.workbench')).not.toContainText('发现新版本')
+    await page.screenshot({ path: info.outputPath('help-update.png') })
     await dialog.getByRole('button', { name: '关闭', exact: true }).click()
-    await expect(status).toContainText(latest)
+    await expect(help).toHaveAttribute('aria-description', '发现新版本')
   } finally {
+    finishStartupCheck?.()
     if (app) await app.release()
     await new Promise(resolve => server.close(resolve))
   }

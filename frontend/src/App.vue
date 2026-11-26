@@ -2,8 +2,8 @@
 import { computed, markRaw, nextTick, onMounted, onUnmounted, provide, reactive, ref, shallowReactive, watch } from 'vue'
 import { darkTheme, enUS, NConfigProvider, zhCN } from 'naive-ui'
 import {
-  Activity, ChevronDown, ChevronRight, CircleCheck, CircleHelp, Database, Download, Ellipsis, Folder, FolderPlus,
-  List, ListChecks, Network, Plus, RefreshCw, Search, Server, Settings, Terminal, Trash2, Upload, X,
+  Activity, BookOpen, ChevronDown, ChevronRight, CircleCheck, CircleHelp, Database, Download, Ellipsis, Folder,
+  FolderPlus, Info, Keyboard, List, ListChecks, Network, Plus, RefreshCw, Search, Server, Settings, Terminal, Trash2, Upload, X,
 } from '@lucide/vue'
 import { Application, Browser, call, desktopCall, Events, updateCall, Window } from './api.js'
 import { asArg, createKeyTreeIndex, decodeBackup, display, download, identity, normalizeConnections, scanKeyBatches } from './model.js'
@@ -23,6 +23,7 @@ import SearchPanel from './SearchPanel.vue'
 import WorkspaceTabs from './components/WorkspaceTabs.vue'
 import WorkspaceMenu from './components/WorkspaceMenu.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
+import HelpDialog from './components/HelpDialog.vue'
 import ShortcutsDialog from './components/ShortcutsDialog.vue'
 
 /** Read the saved workspace and recover cleanly from invalid browser storage. */
@@ -43,8 +44,9 @@ const { scanCount: legacyScanCount, ...savedSettings } = restored.settings || {}
 // Older workspaces saved 400 even when the user had never selected a batch size.
 const savedKeyPageSize = savedSettings.keyPageSize ?? (legacyScanCount === 400 ? undefined : legacyScanCount)
 const settings = reactive({
-  theme: 'light', sidebar: 264, zoom: 100, font: '', recentConnections: [],
+  theme: 'light', sidebar: 264, zoom: 100, recentConnections: [],
   ...savedSettings, language: normalizeLanguage(restored.settings?.language),
+  font: typeof savedSettings.font === 'string' ? savedSettings.font : '',
   keyPageSize: keyPageSizes.includes(savedKeyPageSize) ? savedKeyPageSize : defaultKeyPageSize,
   scheme: normalizePreset(restored.settings?.scheme),
 })
@@ -73,6 +75,7 @@ const draggedConnection = ref(null)
 const dropGroup = ref(null)
 const connectionDialog = ref(null)
 const settingsOpen = ref(false)
+const helpSection = ref(null)
 const closePrompt = ref(false)
 const closeBusy = ref(false)
 const releaseConfig = ref({ version: '', github: false })
@@ -80,7 +83,7 @@ const availableUpdate = ref(null)
 const updateFeedback = ref(null)
 const checkingUpdates = ref(false)
 const updating = ref(false)
-/** Describe the same release state in Settings and the workbench banner. */
+/** Describe the release both in the update dialog and on the Help indicator. */
 const updateTitle = computed(() => {
   if (availableUpdate.value?.ready) return tr('更新已就绪，重启后生效', 'Update ready. Restart to apply.')
   if (updating.value && releaseConfig.value.signed) return tr('正在下载并验证更新…', 'Downloading and verifying update…')
@@ -92,6 +95,7 @@ const updateAction = computed(() => {
   return releaseConfig.value.signed ? tr('安装更新', 'Install update') : tr('查看并下载', 'View and download')
 })
 const deferredRestart = ref(false)
+const updatePending = computed(() => Boolean(availableUpdate.value && !deferredRestart.value))
 const shortcutsOpen = ref(false)
 const context = ref(null)
 const question = ref(null)
@@ -103,6 +107,7 @@ const themeQuery = matchMedia('(prefers-color-scheme: dark)')
 const systemDark = ref(themeQuery.matches)
 let messageTimer
 let updateTimer
+let reportUpdateCheck = false
 let stopCloseListener
 let stopTrayQuitListener
 let questionRevision = 0
@@ -123,28 +128,33 @@ function notify(text, error = false) {
 async function startUpdateChecks() {
   releaseConfig.value = await updateCall('Configuration')
   if (!releaseConfig.value.github && !releaseConfig.value.signed) return
-  void checkForUpdate()
+  void checkForUpdate(helpSection.value === 'updates')
   updateTimer = setInterval(checkForUpdate, 6 * 60 * 60 * 1000)
 }
 
-/** Check for a stable release and keep manual feedback with the update controls. */
+/** Check for a stable release and report a manual request that joins an existing check. */
 async function checkForUpdate(manual = false) {
-  if (checkingUpdates.value || updating.value) return
-  if (manual) updateFeedback.value = null
+  if (updating.value) return
+  if (manual) {
+    reportUpdateCheck = true
+    updateFeedback.value = null
+  }
+  if (checkingUpdates.value) return
   checkingUpdates.value = true
   try {
     const release = await updateCall('Check')
     if (!release.version) {
       availableUpdate.value = null
-      if (manual) updateFeedback.value = { text: tr('当前已是最新版本', 'You are up to date') }
-    } else if (manual || release.ready || release.version !== localStorage.getItem('ardm-dismissed-update')) {
+      if (reportUpdateCheck) updateFeedback.value = { text: tr('当前已是最新版本', 'You are up to date') }
+    } else if (reportUpdateCheck || release.ready || release.version !== localStorage.getItem('ardm-dismissed-update')) {
       availableUpdate.value = release
       updateFeedback.value = null
-      if (manual) deferredRestart.value = false
+      if (reportUpdateCheck) deferredRestart.value = false
     }
   } catch (error) {
-    if (manual) updateFeedback.value = { text: tr('检查更新失败', 'Could not check for updates') + ' · ' + (error.message || String(error)), error: true }
+    if (reportUpdateCheck) updateFeedback.value = { text: tr('检查更新失败', 'Could not check for updates') + ' · ' + (error.message || String(error)), error: true }
   } finally {
+    reportUpdateCheck = false
     checkingUpdates.value = false
   }
 }
@@ -153,6 +163,7 @@ async function checkForUpdate(manual = false) {
 function dismissUpdate() {
   localStorage.setItem('ardm-dismissed-update', availableUpdate.value.version)
   availableUpdate.value = null
+  updateFeedback.value = null
 }
 
 /** Apply the current update action while leaving its result beside the release. */
@@ -163,7 +174,7 @@ async function openUpdate() {
   updating.value = true
   try {
     if (release.ready) {
-      if (tabs.value.some(tab => tab.dirty)) settingsOpen.value = false
+      if (tabs.value.some(tab => tab.dirty)) helpSection.value = null
       if (await confirmDiscard(tabs.value)) await updateCall('RestartUpdate')
     } else if (releaseConfig.value.signed) {
       await updateCall('PrepareUpdate', release.version)
@@ -176,6 +187,13 @@ async function openUpdate() {
   } finally {
     updating.value = false
   }
+}
+
+/** Open a Help command and immediately check the feed when requested. */
+function openHelp(section) {
+  context.value = null
+  helpSection.value = section
+  if (section === 'updates' && (releaseConfig.value.github || releaseConfig.value.signed)) void checkForUpdate(true)
 }
 
 /** Ask for a value or explicit destructive-action confirmation inside the desktop window. */
@@ -664,10 +682,14 @@ async function flushDatabase() {
   }
 }
 
-/** Position the connection, group, tab, or key operations menu in the viewport. */
+/** Anchor footer Help above its button and other workspace menus at their trigger. */
 function menu(event, kind, value) {
   const anchor = event.target.closest?.('button') || event.currentTarget.querySelector('button') || document.activeElement
   const bounds = anchor?.getBoundingClientRect()
+  if (kind === 'help' && bounds) {
+    context.value = { x: bounds.right, y: bounds.top, kind, anchor, placement: 'top-end' }
+    return
+  }
   const keyboard = !event.clientX && !event.clientY
   context.value = { x: keyboard ? bounds?.left ?? 4 : event.clientX, y: keyboard ? bounds?.bottom ?? 4 : event.clientY, kind, value, anchor }
 }
@@ -786,7 +808,7 @@ onUnmounted(() => {
     @click="context = null">
     <WorkspaceSidebar v-model:mode="sidebarMode" :connected="Boolean(session && !session.connecting)" @tool="kind => openTool(kind, kind === 'cli')">
       <template #header>
-      <header class="brand"><img src="/logo.png" alt=""><div><strong>RedisPal</strong></div>
+      <header class="brand"><img src="/logo.png" class="app-logo" alt=""><div><strong>RedisPal</strong></div>
         <NButton size="small" quaternary class="flat icon" :title="tr('设置', 'Settings')" :aria-label="tr('设置', 'Settings')" @click="settingsOpen = true"><Settings :size="17" /></NButton>
       </header>
       <div class="connection-actions">
@@ -897,7 +919,10 @@ onUnmounted(() => {
           <template v-else-if="connectionErrors[selectedId]">{{ tr('连接失败', 'Connection failed') }}</template>
           <template v-else>{{ tr('未连接', 'Disconnected') }}</template>
         </span>
-        <NButton size="small" quaternary class="flat icon" :title="tr('快捷键', 'Keyboard shortcuts')" @click="shortcutsOpen = true"><CircleHelp :size="17" /></NButton>
+        <NButton size="small" quaternary class="flat" aria-haspopup="menu" :aria-expanded="context?.kind === 'help'"
+          :aria-description="updatePending ? updateTitle : undefined" @click.stop="context?.kind === 'help' ? context = null : menu($event, 'help')">
+          <CircleHelp :size="16" aria-hidden="true" />{{ tr('帮助', 'Help') }}<span v-if="updatePending" class="help-update-dot" aria-hidden="true"></span>
+        </NButton>
       </footer>
       </template>
     </WorkspaceSidebar>
@@ -908,25 +933,10 @@ onUnmounted(() => {
       <WorkspaceTabs :tabs="tabs" :active-id="activeId" :focus-tab-id="focusTabId" :names="tabNames"
         @activate="activateTab" @close="closeTab" @menu="(event, tab) => menu(event, 'tab', tab)"
         @focus-request-complete="clearTabFocus" />
-      <div v-if="availableUpdate && !deferredRestart && !settingsOpen" class="update-banner">
-        <Download :size="17" aria-hidden="true" />
-        <div class="update-message">
-          <div role="status">
-            <strong>{{ updateTitle }}</strong>
-            <span>{{ releaseConfig.version }} → {{ availableUpdate.version }}</span>
-          </div>
-          <p v-if="updateFeedback?.error" class="update-error" role="alert">{{ updateFeedback.text }}</p>
-        </div>
-        <NButton size="small" type="primary" class="primary" :disabled="checkingUpdates || updating" :loading="updating" @click="openUpdate">
-          {{ updateAction }}
-        </NButton>
-        <NButton v-if="availableUpdate.ready" size="small" quaternary :disabled="updating" @click="deferredRestart = true">{{ tr('稍后', 'Later') }}</NButton>
-        <NButton v-else size="small" quaternary class="flat icon" :disabled="updating" :aria-label="tr('关闭更新提示', 'Dismiss update')" @click="dismissUpdate"><X :size="16" /></NButton>
-      </div>
       <section v-show="active.kind === 'home'" id="workspace-panel-0" class="home" role="tabpanel" aria-labelledby="workspace-tab-0">
         <div class="home-content">
           <div class="home-intro">
-            <img src="/logo.png" alt="" class="home-logo">
+            <img src="/logo.png" alt="" class="app-logo home-logo">
             <div>
               <h1>RedisPal</h1>
               <p>{{ tr('打开已有连接，或添加一个 Redis 服务器。', 'Open a saved connection or add a Redis server.') }}</p>
@@ -950,12 +960,6 @@ onUnmounted(() => {
               <NButton size="small" @click="openTool('cli', true)">Redis CLI</NButton>
             </div>
           </section>
-          <div v-if="releaseConfig.version" class="home-version">
-            <span>{{ releaseConfig.version }}</span>
-            <NButton v-if="releaseConfig.github || releaseConfig.signed" size="small" quaternary :disabled="checkingUpdates || updating" :loading="checkingUpdates" @click="checkForUpdate(true)">{{ tr('检查更新', 'Check for updates') }}</NButton>
-            <p v-if="updateFeedback && (!availableUpdate || deferredRestart) && !settingsOpen" class="home-update-feedback"
-              :class="{ 'update-error': updateFeedback.error }" :role="updateFeedback.error ? 'alert' : 'status'">{{ updateFeedback.text }}</p>
-          </div>
         </div>
       </section>
       <template v-for="(tab, index) in tabs" :key="tab.id">
@@ -978,8 +982,14 @@ onUnmounted(() => {
     <input ref="fileInput" type="file" hidden accept=".json,application/json" @change="importConnections">
     <input ref="backupInput" type="file" hidden accept=".json,.csv" @change="importKeys">
 
-    <WorkspaceMenu v-if="context" :context="context" :label="tr('工作区操作', 'Workspace actions')" @close="context = null">
-      <template v-if="context.kind === 'workspace'">
+    <WorkspaceMenu v-if="context" :context="context" :label="context.kind === 'help' ? tr('帮助', 'Help') : tr('工作区操作', 'Workspace actions')" @close="context = null">
+      <template v-if="context.kind === 'help'">
+        <NButton size="small" role="menuitem" tabindex="-1" quaternary class="flat" @click="openHelp('guide')"><BookOpen :size="15" aria-hidden="true" />{{ tr('使用帮助', 'User guide') }}</NButton>
+        <NButton size="small" role="menuitem" tabindex="-1" quaternary class="flat" @click="context = null; shortcutsOpen = true"><Keyboard :size="15" aria-hidden="true" />{{ tr('快捷键', 'Keyboard shortcuts') }}</NButton>
+        <NButton size="small" role="menuitem" tabindex="-1" quaternary class="flat" @click="openHelp('updates')"><RefreshCw :size="15" aria-hidden="true" />{{ tr('检查更新', 'Check for updates') }}</NButton>
+        <NButton size="small" role="menuitem" tabindex="-1" quaternary class="flat" @click="openHelp('about')"><Info :size="15" aria-hidden="true" />{{ tr('关于 RedisPal', 'About RedisPal') }}</NButton>
+      </template>
+      <template v-else-if="context.kind === 'workspace'">
         <NButton size="small" role="menuitem" tabindex="-1" quaternary class="flat" @click="editGroup()"><FolderPlus :size="16" />{{ tr('新建分组', 'New group') }}</NButton>
         <NButton size="small" role="menuitem" tabindex="-1" quaternary class="flat" @click="context = null; fileInput.click()"><Upload :size="15" />{{ tr('导入连接', 'Import connections') }}</NButton>
         <NButton size="small" role="menuitem" tabindex="-1" quaternary class="flat" @click="context = null; exportConnections()"><Download :size="15" />{{ tr('导出连接', 'Export connections') }}</NButton>
@@ -1013,10 +1023,11 @@ onUnmounted(() => {
     </WorkspaceMenu>
 
     <ConnectionDialog v-if="connectionDialog" :initial="connectionDialog.initial" :editing="connectionDialog.editing" :groups="groups" @save="saveConnection" @close="connectionDialog = null" />
-    <SettingsDialog v-if="settingsOpen" :settings="settings" :palette="palette" :key-page-sizes="keyPageSizes"
-      :release="releaseConfig" :available-update="availableUpdate" :update-feedback="updateFeedback"
-      :update-title="updateTitle" :update-action="updateAction" :checking="checkingUpdates" :updating="updating"
-      @check="checkForUpdate(true)" @apply-update="openUpdate" @close="settingsOpen = false" />
+    <SettingsDialog v-if="settingsOpen" :settings="settings" :palette="palette" :key-page-sizes="keyPageSizes" @close="settingsOpen = false" />
+    <HelpDialog v-if="helpSection" :section="helpSection" :release="releaseConfig" :available-update="availableUpdate"
+      :update-feedback="updateFeedback" :update-title="updateTitle" :update-action="updateAction" :checking="checkingUpdates" :updating="updating"
+      @check="checkForUpdate(true)" @apply-update="openUpdate" @dismiss-update="dismissUpdate"
+      @defer-restart="deferredRestart = true; helpSection = null" @close="helpSection = null" />
     <ShortcutsDialog v-if="shortcutsOpen" @close="shortcutsOpen = false" />
     <WorkspaceDialog v-if="question" :title-id="'question-title-' + question.id" :description-id="question.text ? 'question-description-' + question.id : undefined" @close="answer(false)">
       <template #default="{ requestClose, titleId, descriptionId }">

@@ -33,14 +33,18 @@ function select(event) {
   if (event.target.closest('[role="menuitem"]')) props.context.anchor?.focus({ preventScroll: true })
 }
 
+/** Keep menus in the viewport and anchor footer commands above their trigger. */
 watch(() => props.context, async current => {
   if (!current) return
   await nextTick()
   if (props.context !== current || !panel.value) return
   const bounds = panel.value.getBoundingClientRect()
   const scale = bounds.width / panel.value.offsetWidth
-  panel.value.style.left = Math.max(4, Math.min(current.x, innerWidth - bounds.width - 4)) / scale + 'px'
-  panel.value.style.top = Math.max(4, Math.min(current.y, innerHeight - bounds.height - 4)) / scale + 'px'
+  const topEnd = current.placement === 'top-end'
+  const left = topEnd ? current.x - bounds.width : current.x
+  const top = topEnd ? current.y - bounds.height - 4 : current.y
+  panel.value.style.left = Math.max(4, Math.min(left, innerWidth - bounds.width - 4)) / scale + 'px'
+  panel.value.style.top = Math.max(4, Math.min(top, innerHeight - bounds.height - 4)) / scale + 'px'
   items()[0]?.focus()
 }, { flush: 'post', immediate: true })
 </script>

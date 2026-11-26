@@ -33,7 +33,7 @@ foreach ($arch in 'amd64', 'arm64') {
 - Redis Search 支持浏览和创建索引、字段补全、查询收藏、Explain 和 Profile，需要 Redis 服务端提供 `FT.*`。Stream 详情支持实时刷新、消费组和待处理消息管理。
 - 实时监控支持筛选和导出，Cluster 连接观察一个主节点。慢日志支持自动刷新以及按主节点读取和修改阈值与日志长度，依赖服务端 ACL 权限。
 - Text、JSON、Hex、Binary、MessagePack、PHP、Java、Pickle、Protobuf 和压缩格式视图。自定义格式化器直接启动指定程序，将值通过标准输入传入。
-- 浅色、深色和跟随系统模式，默认使用 Naive UI 配色，支持自选配色、字体、缩放和快捷键。界面支持简体中文和英文，首次启动及旧语言设置回退时使用简体中文。
+- 浅色、深色和跟随系统模式，默认使用 Naive UI 配色，支持自选配色、字体和缩放。「帮助」菜单提供使用指南、快捷键、检查更新和版本信息。界面支持简体中文和英文，首次启动及旧语言设置回退时使用简体中文。
 
 ## 测试
 
@@ -61,9 +61,9 @@ git tag -a v0.0.7 -m "RedisPal v0.0.7"
 git push origin v0.0.7
 ```
 
-标签推送会触发测试、Windows x64 构建和 GitHub Release。软件显示的版本直接取自标签，例如推送 `v0.0.7` 后，设置和发布页都会显示 `v0.0.7`。设置的「更新」页也提供项目 GitHub 仓库链接。
+标签推送会触发测试、Windows x64 构建和 GitHub Release。软件显示的版本直接取自标签，可通过「帮助 → 关于 RedisPal」查看版本或打开项目的 GitHub 仓库。
 
-[GitHub Releases](https://github.com/zhanggc2019/RedisPal/releases) 提供免安装版 `RedisPal-windows-x64.exe`、安装包 `RedisPal-windows-x64-setup.exe`、`SHA256SUMS` 和签名更新清单 `update-manifest.json`。RedisPal 启动时和运行期间每六小时检查正式版本，也可在设置中点击「检查更新」。签名版发现新版后，点击「安装更新」会下载并验签，成功后可选择「立即重启」或「稍后」。选择「稍后」后，可在本次运行期间重新检查更新以打开重启提示。v0.0.7 及更早提供「查看并下载」的版本需要从发布页手动升级一次。
+[GitHub Releases](https://github.com/zhanggc2019/RedisPal/releases) 提供免安装版 `RedisPal-windows-x64.exe`、安装包 `RedisPal-windows-x64-setup.exe`、`SHA256SUMS` 和签名更新清单 `update-manifest.json`。RedisPal 启动时和运行期间每六小时检查正式版本，发现新版时在「帮助」入口显示提示。也可通过「帮助 → 检查更新」手动检查。签名版点击「安装更新」会下载并验签，成功后可选择「立即重启」或「稍后」。选择「稍后」后，可在本次运行期间重新检查更新以打开重启提示。v0.0.7 及更早提供「查看并下载」的版本需要从发布页手动升级一次。
 
 首次发布签名版前，在仓库根目录运行以下 PowerShell 命令。先安装并登录有仓库管理权限的 GitHub CLI，再将密钥生成到仓库外。私钥文件请妥善保管。
 
@@ -81,4 +81,4 @@ gh variable set REDISPAL_UPDATE_PUBLIC_KEY --body $publicKey --repo zhanggc2019/
 
 可通过 `--host`、`--port`、`--auth`、`--username`、`--cluster`、`--readonly`、`--ssh-*`、`--ssl-*` 和 `--sentinel-*` 等启动参数配置连接。加上 `--save` 可保存通过命令行创建的连接。
 
-如需自托管签名更新源，可通过 `build.ps1 -AppVersion <版本> -UpdateManifestURL <HTTPS 地址> -UpdatePublicKey <Base64 公钥>` 接入 Wails 更新清单。配置成功后，可在设置的「更新」页检查该更新源。[Wails 更新清单协议](https://v3.wails.io/reference/update-manifest/)
+如需自托管签名更新源，可通过 `build.ps1 -AppVersion <版本> -UpdateManifestURL <HTTPS 地址> -UpdatePublicKey <Base64 公钥>` 接入 Wails 更新清单。配置成功后，可通过「帮助 → 检查更新」检查该更新源。[Wails 更新清单协议](https://v3.wails.io/reference/update-manifest/)
