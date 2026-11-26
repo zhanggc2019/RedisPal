@@ -332,8 +332,12 @@ legend { color: var(--muted); margin-left: 2px; padding: 0 4px; }
 .settings-footer { color: var(--muted); }
 .help-content { display: grid; gap: 16px; }
 .help-content > :not(:last-child) { margin-bottom: 0; }
-.help-topic h3 { margin: 0 0 4px; font-size: 14px; font-weight: 650; }
+.help-topic h3, .release-notes h3 { margin: 0 0 4px; font-size: 14px; font-weight: 650; }
 .help-topic p, .about-product p { color: var(--muted); }
+.release-notes { padding-top: 12px; border-top: 1px solid var(--border); line-height: 1.5; overflow-wrap: anywhere; }
+.release-notes ul { margin: 0; padding-inline-start: 20px; }
+.release-notes li + li { margin-top: 4px; }
+.release-notes p { white-space: pre-wrap; }
 .about-product { display: flex; align-items: center; gap: 12px; }
 .about-product img { flex: none; }
 .about-product p { margin-top: 4px; }

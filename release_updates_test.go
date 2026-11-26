@@ -20,13 +20,15 @@ import (
 // TestReleaseUpdateCheck compares stable releases numerically and only links to the official repository.
 func TestReleaseUpdateCheck(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		status int
-		body   string
-		want   string
-		fails  bool
+		name      string
+		status    int
+		body      string
+		want      string
+		wantNotes string
+		fails     bool
 	}{
-		{name: "latest", status: 200, body: `{"tag_name":"v0.0.10","html_url":"https://untrusted.invalid"}`, want: "v0.0.10"},
+		{name: "latest", status: 200, body: `{"tag_name":"v0.0.10","html_url":"https://untrusted.invalid","body":"## 中文\n\n- 修复连接问题。"}`, want: "v0.0.10", wantNotes: "## 中文\n\n- 修复连接问题。"},
+		{name: "old release format", status: 200, body: `{"tag_name":"v0.0.10"}`, want: "v0.0.10"},
 		{name: "same", status: 200, body: `{"tag_name":"v0.0.2"}`},
 		{name: "older", status: 200, body: `{"tag_name":"v0.0.1"}`},
 		{name: "draft", status: 200, body: `{"tag_name":"v0.0.3","draft":true}`},
@@ -47,13 +49,24 @@ func TestReleaseUpdateCheck(t *testing.T) {
 			service := newReleaseUpdates("0.0.2")
 			service.endpoint = server.URL
 			result, err := service.Check(t.Context())
-			if (err != nil) != tc.fails || result.Version != tc.want {
+			if (err != nil) != tc.fails || result.Version != tc.want || result.Notes != tc.wantNotes {
 				t.Fatalf("Check() returned %+v, %v", result, err)
 			}
 			if tc.want != "" && result.URL != "https://github.com/zhanggc2019/RedisPal/releases/tag/"+tc.want {
 				t.Fatalf("unexpected download URL: %s", result.URL)
 			}
 		})
+	}
+}
+
+// TestReleaseConfigurationNotes exposes only the currently installed version's bundled notes.
+func TestReleaseConfigurationNotes(t *testing.T) {
+	config := newReleaseUpdates("0.1.1").Configuration()
+	if !strings.Contains(config.Notes, "## 中文") || !strings.Contains(config.Notes, "## English") {
+		t.Fatalf("expected bilingual notes for %s, got %q", config.Version, config.Notes)
+	}
+	if notes := newReleaseUpdates("9.9.9").Configuration().Notes; notes != "" {
+		t.Fatalf("unexpected notes for an unbundled version: %q", notes)
 	}
 }
 
@@ -67,6 +80,7 @@ func TestSignedUpdatePreparation(t *testing.T) {
 		t.Fatal(err)
 	}
 	const payload = "RedisPal test update"
+	const notes = "## 中文\n\n- 调整更新窗口。\n\n## English\n\n- Refine the update dialog."
 	digest := sha256.Sum256([]byte(payload))
 	signature := ed25519.Sign(privateKey, digest[:])
 	invalidSignature := append([]byte(nil), signature...)
@@ -97,7 +111,7 @@ func TestSignedUpdatePreparation(t *testing.T) {
 				switch r.URL.Path {
 				case "/manifest.json":
 					_ = json.NewEncoder(w).Encode(map[string]any{
-						"schemaVersion": 1, "version": "0.0.2", "artifacts": []any{artifact},
+						"schemaVersion": 1, "version": "0.0.2", "notes": notes, "artifacts": []any{artifact},
 					})
 				case "/app.exe":
 					downloads.Add(1)
@@ -124,7 +138,7 @@ func TestSignedUpdatePreparation(t *testing.T) {
 				t.Fatalf("unexpected configuration: %+v", config)
 			}
 			result, err := service.Check(t.Context())
-			if err != nil || result.Version != "v0.0.2" || result.Ready || downloads.Load() != 0 {
+			if err != nil || result.Version != "v0.0.2" || result.Notes != notes || result.Ready || downloads.Load() != 0 {
 				t.Fatalf("check returned %+v, %v after %d downloads", result, err, downloads.Load())
 			}
 			if err := service.PrepareUpdate(t.Context(), "v0.0.3"); err == nil || downloads.Load() != 0 {
@@ -153,7 +167,7 @@ func TestSignedUpdatePreparation(t *testing.T) {
 				}
 			})
 			result, err = service.Check(t.Context())
-			if err != nil || !result.Ready || result.Version != "v0.0.2" {
+			if err != nil || !result.Ready || result.Version != "v0.0.2" || result.Notes != notes {
 				t.Fatalf("check after preparation returned %+v, %v", result, err)
 			}
 			if err := service.PrepareUpdate(t.Context(), result.Version); err != nil || downloads.Load() != 1 {

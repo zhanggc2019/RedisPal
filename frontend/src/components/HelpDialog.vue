@@ -2,6 +2,7 @@
 import { computed, inject } from 'vue'
 import { ExternalLink, X } from '@lucide/vue'
 import { Browser } from '../api.js'
+import ReleaseNotes from './ReleaseNotes.vue'
 import StatusNotice from './StatusNotice.vue'
 
 const props = defineProps({
@@ -52,6 +53,7 @@ const guide = [
               <p>{{ tr('用于浏览和管理 Redis 数据的桌面客户端。', 'A desktop client for browsing and managing Redis data.') }}</p>
             </div>
           </div>
+          <ReleaseNotes :notes="release.notes" />
           <a v-if="release.repositoryUrl" class="help-link" :href="release.repositoryUrl" @click.prevent="Browser.OpenURL(release.repositoryUrl)">
             {{ tr('GitHub 仓库', 'GitHub repository') }}<ExternalLink :size="14" aria-hidden="true" />
           </a>
@@ -74,6 +76,7 @@ const guide = [
               <NButton type="primary" size="small" :disabled="checking || updating" :loading="updating" @click="emit('apply-update')">{{ updateAction }}</NButton>
             </div>
           </div>
+          <ReleaseNotes :notes="availableUpdate ? availableUpdate.notes : release.notes" />
         </div>
         <footer class="modal-footer end"><NButton size="small" :disabled="closeDisabled" @click="requestClose">{{ tr('关闭', 'Close') }}</NButton></footer>
       </section>

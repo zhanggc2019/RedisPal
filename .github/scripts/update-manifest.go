@@ -23,10 +23,14 @@ func main() {
 	switch {
 	case len(args) == 2 && args[0] == "keygen":
 		err = keygen(args[1])
-	case len(args) == 5 && args[0] == "sign":
-		err = sign(args[1], args[2], args[3], args[4])
+	case (len(args) == 5 || len(args) == 6) && args[0] == "sign":
+		var notesFile string
+		if len(args) == 6 {
+			notesFile = args[5]
+		}
+		err = sign(args[1], args[2], args[3], args[4], notesFile)
 	default:
-		err = errors.New("usage: update-manifest keygen PRIVATE_KEY_FILE | sign OWNER/REPO TAG EXE MANIFEST")
+		err = errors.New("usage: update-manifest keygen PRIVATE_KEY_FILE | sign OWNER/REPO TAG EXE MANIFEST [NOTES_FILE]")
 	}
 	if err != nil {
 		log.Fatal(err)
@@ -50,7 +54,8 @@ func keygen(path string) error {
 	return nil
 }
 
-func sign(repo, tag, exe, destination string) error {
+// sign records optional release notes alongside the verified update artifact metadata.
+func sign(repo, tag, exe, destination, notesFile string) error {
 	if !regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`).MatchString(repo) || !regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`).MatchString(tag) {
 		return errors.New("expected a GitHub repository and a stable vX.Y.Z tag")
 	}
@@ -91,6 +96,13 @@ func sign(repo, tag, exe, destination string) error {
 			"signatureAlgo": "ed25519",
 			"signature":     ed25519.Sign(private, digest),
 		}},
+	}
+	if notesFile != "" {
+		notes, err := os.ReadFile(notesFile)
+		if err != nil {
+			return err
+		}
+		manifest["notes"] = strings.TrimSpace(string(notes))
 	}
 	encoded, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {

@@ -39,9 +39,9 @@ jobs:
         id: version
         if: github.ref_type == 'tag' && github.event.created
         run: node .github/scripts/release-version.mjs
-      - name: Test release tag validation and the Vue frontend
+      - name: Test release automation and the Vue frontend
         run: |
-          node --test .github/scripts/release-version.test.mjs
+          node --test .github/scripts/release-version.test.mjs .github/scripts/release-notes.test.mjs
           npm --prefix frontend ci
           npm --prefix frontend test
       - name: Test the Redis service against Redis
@@ -66,12 +66,14 @@ jobs:
     if: github.ref_type == 'tag' && github.event.created
     env:
       APP_VERSION: ${{ needs.test.outputs.version }}
+      RELEASE_TAG: ${{ needs.test.outputs.tag }}
       REDISPAL_UPDATE_PUBLIC_KEY: ${{ vars.REDISPAL_UPDATE_PUBLIC_KEY }}
       CGO_ENABLED: '0'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
@@ -97,6 +99,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Path release | Out-Null
+          node .github/scripts/release-notes.mjs $env:RELEASE_TAG
+          if ($LASTEXITCODE -ne 0) { throw 'Could not prepare release notes' }
+          Copy-Item -LiteralPath "release-notes/${env:RELEASE_TAG}.md" -Destination release/RELEASE_NOTES.md
           if ($env:REDISPAL_UPDATE_PUBLIC_KEY -cnotmatch '^[A-Za-z0-9+/]{43}=$') {
             throw 'Configure REDISPAL_UPDATE_PUBLIC_KEY before building a signed release.'
           }
@@ -113,6 +118,7 @@ jobs:
           path: |
             release/RedisPal-windows-x64.exe
             release/RedisPal-windows-x64-setup.exe
+            release/RELEASE_NOTES.md
           if-no-files-found: error
 
   release:
@@ -141,7 +147,7 @@ jobs:
           REDISPAL_UPDATE_PUBLIC_KEY: ${{ vars.REDISPAL_UPDATE_PUBLIC_KEY }}
         run: |
           go run ./.github/scripts/update-manifest.go sign "$GITHUB_REPOSITORY" "$TAG" \
-            release/RedisPal-windows-x64.exe release/update-manifest.json
+            release/RedisPal-windows-x64.exe release/update-manifest.json release/RELEASE_NOTES.md
       - name: Publish the tested build against its existing tag
         shell: bash
         run: |
@@ -156,9 +162,9 @@ jobs:
           if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
             if [[ "$draft" == 'true' ]]; then
               gh release upload "$TAG" "${binaries[@]}" SHA256SUMS update-manifest.json --clobber
-              gh release edit "$TAG" --draft=false
+              gh release edit "$TAG" --notes-file RELEASE_NOTES.md --draft=false
             fi
           else
             gh release create "$TAG" "${binaries[@]}" SHA256SUMS update-manifest.json \
-              --verify-tag --title "RedisPal $TAG" --generate-notes
+              --verify-tag --title "RedisPal $TAG" --notes-file RELEASE_NOTES.md
           fi

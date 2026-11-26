@@ -909,6 +909,10 @@ test('desktop groups help, shortcuts and About under the Help menu', async ({}, 
     const about = page.getByRole('dialog', { name: '关于 RedisPal', exact: true })
     await expect(about).toContainText('v' + (process.env.ARDM_TEST_APP_VERSION || '0.0.1'))
     await expect(about.getByRole('link', { name: 'GitHub 仓库' })).toBeVisible()
+    if (process.env.ARDM_TEST_APP_VERSION === '0.1.1') {
+      await expect(about.getByRole('heading', { name: '更新日志', exact: true })).toBeVisible()
+      await expect(about.getByText('新增「帮助」菜单', { exact: false })).toBeVisible()
+    }
     await page.screenshot({ path: info.outputPath('about.png') })
     await page.keyboard.press('Escape')
     await expect(help).toBeFocused()
@@ -941,6 +945,7 @@ test('desktop finds a new release automatically and offers its download page', a
   test.skip(process.platform !== 'win32', 'requires the native Windows build')
   const version = process.env.ARDM_TEST_APP_VERSION || '0.0.1'
   const latest = 'v' + version.replace(/\d+$/, patch => String(Number(patch) + 1))
+  let notes = '## 中文\n\n- 优化连接稳定性。\n\n## English\n\n- Improve connection stability.'
   let checks = 0
   let tag = latest
   let responseCode = 200
@@ -953,7 +958,7 @@ test('desktop finds a new release automatically and offers its download page', a
       finishStartupCheck = null
       response.statusCode = responseCode
       response.setHeader('Content-Type', 'application/json')
-      response.end(JSON.stringify({ tag_name: tag }))
+      response.end(JSON.stringify({ tag_name: tag, body: notes }))
     }
     if (holdNextCheck) {
       holdNextCheck = false
@@ -982,6 +987,8 @@ test('desktop finds a new release automatically and offers its download page', a
     await openUpdater()
     await expect(dialog.getByRole('status')).toContainText(latest)
     await expect(dialog.getByRole('button', { name: '查看并下载' })).toBeVisible()
+    await expect(dialog.getByRole('heading', { name: '更新日志', exact: true })).toBeVisible()
+    await expect(dialog.getByRole('listitem')).toHaveText(['优化连接稳定性。'])
     await dialog.getByRole('button', { name: '忽略此版本', exact: true }).click()
     await expect(help).not.toHaveAttribute('aria-description', '发现新版本')
     await dialog.getByRole('button', { name: '关闭', exact: true }).click()
@@ -1012,6 +1019,15 @@ test('desktop finds a new release automatically and offers its download page', a
     await page.screenshot({ path: info.outputPath('help-update.png') })
     await dialog.getByRole('button', { name: '关闭', exact: true }).click()
     await expect(help).toHaveAttribute('aria-description', '发现新版本')
+    await english(page)
+    await page.getByRole('button', { name: 'Help', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Check for updates', exact: true }).click()
+    const englishDialog = page.getByRole('dialog', { name: 'Check for updates', exact: true })
+    await expect(englishDialog.getByRole('heading', { name: 'Release notes', exact: true })).toBeVisible()
+    await expect(englishDialog.getByRole('listitem')).toHaveText(['Improve connection stability.'])
+    notes = '## 中文\n\n- 仅提供中文的改动。'
+    await englishDialog.getByRole('button', { name: 'Check for updates', exact: true }).click()
+    await expect(englishDialog.getByRole('listitem')).toHaveText(['仅提供中文的改动。'])
   } finally {
     finishStartupCheck?.()
     if (app) await app.release()

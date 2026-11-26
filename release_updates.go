@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,12 +22,16 @@ const (
 	releaseRepositoryURL = "https://github.com/" + releaseRepository
 )
 
+//go:embed release-notes/*.md
+var bundledReleaseNotes embed.FS
+
 // ReleaseConfiguration describes the current build and whether it follows GitHub Releases.
 type ReleaseConfiguration struct {
 	Version       string `json:"version"`
 	GitHub        bool   `json:"github"`
 	Signed        bool   `json:"signed"`
 	RepositoryURL string `json:"repositoryUrl"`
+	Notes         string `json:"notes,omitempty"`
 }
 
 // ReleaseUpdate describes a newer stable release and its official download page.
@@ -34,6 +39,7 @@ type ReleaseUpdate struct {
 	Version string `json:"version"`
 	URL     string `json:"url"`
 	Ready   bool   `json:"ready"`
+	Notes   string `json:"notes,omitempty"`
 }
 
 // ReleaseUpdates coordinates version checks and user-initiated updates.
@@ -43,8 +49,7 @@ type ReleaseUpdates struct {
 	client   *http.Client
 	native   *updater.Updater
 	mu       sync.Mutex
-	pending  string
-	ready    string
+	pending  ReleaseUpdate
 }
 
 // newReleaseUpdates pins the default feed to RedisPal's GitHub repository.
@@ -56,13 +61,15 @@ func newReleaseUpdates(version string) *ReleaseUpdates {
 	}
 }
 
-// Configuration returns immediately so Settings can display the version offline.
+// Configuration returns the build version and its bundled release notes offline.
 func (s *ReleaseUpdates) Configuration() ReleaseConfiguration {
+	notes, _ := bundledReleaseNotes.ReadFile("release-notes/" + s.version + ".md")
 	return ReleaseConfiguration{
 		Version:       s.version,
 		GitHub:        s.native == nil && s.endpoint != "",
 		Signed:        s.native != nil,
 		RepositoryURL: releaseRepositoryURL,
+		Notes:         strings.TrimSpace(string(notes)),
 	}
 }
 
@@ -71,10 +78,10 @@ func (s *ReleaseUpdates) Check(ctx context.Context) (ReleaseUpdate, error) {
 	if s.native != nil {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if s.ready != "" {
-			return ReleaseUpdate{Version: s.ready, Ready: true}, nil
+		if s.pending.Ready {
+			return s.pending, nil
 		}
-		s.pending = ""
+		s.pending = ReleaseUpdate{}
 		release, err := s.native.Check(ctx)
 		if err != nil || release == nil {
 			return ReleaseUpdate{}, err
@@ -83,11 +90,11 @@ func (s *ReleaseUpdates) Check(ctx context.Context) (ReleaseUpdate, error) {
 		if !semver.IsValid(version) || semver.Prerelease(version) != "" || semver.Compare(version, s.version) <= 0 {
 			return ReleaseUpdate{}, nil
 		}
-		s.pending = version
-		return ReleaseUpdate{Version: version}, nil
+		s.pending = ReleaseUpdate{Version: version, Notes: strings.TrimSpace(release.Notes)}
+		return s.pending, nil
 	}
 	var update ReleaseUpdate
-	if !s.Configuration().GitHub {
+	if s.endpoint == "" {
 		return update, nil
 	}
 	if !semver.IsValid(s.version) {
@@ -115,6 +122,7 @@ func (s *ReleaseUpdates) Check(ctx context.Context) (ReleaseUpdate, error) {
 		Tag        string `json:"tag_name"`
 		Draft      bool   `json:"draft"`
 		Prerelease bool   `json:"prerelease"`
+		Notes      string `json:"body"`
 	}
 	if err := json.NewDecoder(io.LimitReader(response.Body, 2<<20)).Decode(&release); err != nil {
 		return update, err
@@ -128,29 +136,32 @@ func (s *ReleaseUpdates) Check(ctx context.Context) (ReleaseUpdate, error) {
 	return ReleaseUpdate{
 		Version: release.Tag,
 		URL:     releaseRepositoryURL + "/releases/tag/" + url.PathEscape(release.Tag),
+		Notes:   strings.TrimSpace(release.Notes),
 	}, nil
 }
 
+// PrepareUpdate downloads and verifies the exact version last offered to the user.
 func (s *ReleaseUpdates) PrepareUpdate(ctx context.Context, version string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.native == nil || version == "" || version != s.pending {
+	if s.native == nil || version == "" || version != s.pending.Version {
 		return errors.New("check for this update again before installing")
 	}
-	if s.ready == version {
+	if s.pending.Ready {
 		return nil
 	}
 	if err := s.native.DownloadAndInstall(ctx); err != nil {
 		return err
 	}
-	s.ready = version
+	s.pending.Ready = true
 	return nil
 }
 
+// RestartUpdate applies the verified update after the user confirms the restart.
 func (s *ReleaseUpdates) RestartUpdate(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.native == nil || s.ready == "" {
+	if s.native == nil || !s.pending.Ready {
 		return errors.New("no verified update is ready")
 	}
 	return s.native.Restart(ctx)

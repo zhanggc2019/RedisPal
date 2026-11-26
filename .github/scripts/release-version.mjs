@@ -1,6 +1,6 @@
 import { appendFileSync } from 'node:fs'
 
-const stableTag = /^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/
+export const stableTag = /^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/
 
 /** Derive the build version directly from the pushed stable release tag. */
 export function releaseVersion(tag) {
