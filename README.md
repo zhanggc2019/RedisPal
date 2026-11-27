@@ -2,6 +2,8 @@
 
 RedisPal 是一款 Windows Redis 桌面客户端。你可以在侧栏管理连接、按树形浏览键，并在多标签工作区中编辑数据、运行 Redis 命令和查看服务器状态。
 
+> 目前仅在 Windows 上实际使用过 RedisPal。尚未在 macOS 上安装体验，界面是否与 Windows 版一致仍有待验证。
+
 [下载 Windows x64 版](https://github.com/zhanggc2019/RedisPal/releases/latest) · [快速上手](#快速上手) · [提交记录](https://github.com/zhanggc2019/RedisPal/commits/main/) · [从源码构建](#从源码构建)
 
 ## 下载与安装
